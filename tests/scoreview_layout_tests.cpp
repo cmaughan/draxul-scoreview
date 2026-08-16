@@ -1,5 +1,8 @@
 #include <catch2/catch_all.hpp>
 
+#include "support/scoreview_engine_fake.h"
+#include "test_support.h"
+
 #include <draxul/scoreview/verovio_layout_engine.h>
 #include <draxul/scoreview/window_engraver.h>
 
@@ -21,21 +24,7 @@ using namespace draxul::scoreview;
 namespace
 {
 
-constexpr const char* MINIMAL_SCORE = R"(<?xml version="1.0" encoding="UTF-8"?>
-<score-partwise version="3.1">
-  <part-list><score-part id="P1"><part-name>Piano</part-name></score-part></part-list>
-  <part id="P1">
-    <measure number="1">
-      <attributes>
-        <divisions>1</divisions>
-        <key><fifths>0</fifths></key>
-        <time><beats>4</beats><beat-type>4</beat-type></time>
-        <clef><sign>G</sign><line>2</line></clef>
-      </attributes>
-      <note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note>
-    </measure>
-  </part>
-</score-partwise>)";
+constexpr std::string_view MINIMAL_SCORE = kScoreHostFixtureMinimalScore;
 
 std::unique_ptr<VerovioLayoutEngine> make_engine()
 {
@@ -46,77 +35,15 @@ std::unique_ptr<VerovioLayoutEngine> make_engine()
     return engine;
 }
 
-std::string read_binary_file(const std::string& path)
+// The shared DeterministicLayoutEngine configured the way these lifetime
+// cases need it: every load blocks on an explicit permit and then reports a
+// deterministic engraving failure.
+std::unique_ptr<DeterministicLayoutEngine> make_blocking_failing_engine(
+    const std::shared_ptr<FakeEngineState>& state)
 {
-    std::ifstream stream(path, std::ios::binary);
-    REQUIRE(stream.good());
-    std::ostringstream buffer;
-    buffer << stream.rdbuf();
-    return buffer.str();
-}
-
-struct BlockingEngineState
-{
-    std::mutex mutex;
-    std::condition_variable changed;
-    int load_calls = 0;
-    int permits = 0;
-    int destroyed = 0;
-    std::vector<std::string> loaded;
-};
-
-class BlockingLayoutEngine final : public ILayoutEngine
-{
-public:
-    explicit BlockingLayoutEngine(std::shared_ptr<BlockingEngineState> state)
-        : state_(std::move(state))
-    {
-    }
-
-    ~BlockingLayoutEngine() override
-    {
-        std::lock_guard lock(state_->mutex);
-        ++state_->destroyed;
-        state_->changed.notify_all();
-    }
-
-    bool load(std::string_view bytes, std::string& error) override
-    {
-        std::unique_lock lock(state_->mutex);
-        ++state_->load_calls;
-        const int call = state_->load_calls;
-        state_->loaded.emplace_back(bytes);
-        state_->changed.notify_all();
-        state_->changed.wait(lock, [this, call]() { return state_->permits >= call; });
-        error = "deterministic fake engraving failure";
-        return false;
-    }
-
-    void set_options(const LayoutOptions&) override { }
-    bool is_loaded() const override { return false; }
-    int page_count() override { return 0; }
-    std::string render_page_svg(int) override { return {}; }
-    std::string render_timemap() override { return {}; }
-    int midi_pitch_for_element(const std::string&) override { return -1; }
-    int note_letter_for_element(const std::string&) override { return -1; }
-    std::vector<std::string> tie_end_ids() override { return {}; }
-
-private:
-    std::shared_ptr<BlockingEngineState> state_;
-};
-
-bool wait_for_loads(const std::shared_ptr<BlockingEngineState>& state, int count)
-{
-    std::unique_lock lock(state->mutex);
-    return state->changed.wait_for(
-        lock, std::chrono::seconds(2), [&]() { return state->load_calls >= count; });
-}
-
-void release_loads(const std::shared_ptr<BlockingEngineState>& state, int count)
-{
-    std::lock_guard lock(state->mutex);
-    state->permits = std::max(state->permits, count);
-    state->changed.notify_all();
+    return std::make_unique<DeterministicLayoutEngine>(
+        state, std::string{}, /*block_load=*/true,
+        /*require_timemap_for_midi=*/false, /*fail_load=*/true);
 }
 
 bool wait_until_idle(WindowEngraver& engraver)
@@ -183,8 +110,8 @@ TEST_CASE("verovio engine lays out the Grieg .mxl and reflows", "[scoreview]")
     options.pixel_scale = 1.0f;
     engine->set_options(options);
 
-    const std::string bytes = read_binary_file(
-        std::string(DRAXUL_PROJECT_ROOT) + "/plugins/scoreview/tests/fixtures/musicxml/grieg-waltz-op-12-no-2.mxl");
+    const std::string bytes = draxul::tests::read_file(draxul::tests::project_root()
+        / "plugins/scoreview/tests/fixtures/musicxml/grieg-waltz-op-12-no-2.mxl");
     std::string error;
     REQUIRE(engine->load(bytes, error));
 
@@ -214,7 +141,7 @@ TEST_CASE("window engraver engraves off-thread and echoes placement", "[scorevie
     CHECK_FALSE(engraver->busy());
 
     WindowEngraver::Job job;
-    job.window_xml = MINIMAL_SCORE;
+    job.window_xml = std::string(MINIMAL_SCORE);
     job.params.pixel_scale = 1.0f;
     job.params.marking_qpm = 120.0;
     job.first_bar = 3; // placement metadata is opaque to the engrave; echoed back
@@ -246,7 +173,7 @@ TEST_CASE("window engraver engraves off-thread and echoes placement", "[scorevie
     // Reusing the worker and invalidating an in-flight engrave must not
     // deadlock or expose the stale result.
     WindowEngraver::Job again;
-    again.window_xml = MINIMAL_SCORE;
+    again.window_xml = std::string(MINIMAL_SCORE);
     again.params.marking_qpm = 120.0;
     REQUIRE(engraver->submit(std::move(again)) != 0);
     engraver->cancel();
@@ -281,9 +208,9 @@ TEST_CASE("window engraver reports a bad window without wedging", "[scoreview]")
 TEST_CASE("window engraver coalesces rapid requests and publishes only the latest generation",
     "[scoreview][engraver][lifetime]")
 {
-    auto state = std::make_shared<BlockingEngineState>();
+    auto state = std::make_shared<FakeEngineState>();
     std::string error;
-    auto engraver = WindowEngraver::create(std::make_unique<BlockingLayoutEngine>(state), error);
+    auto engraver = WindowEngraver::create(make_blocking_failing_engine(state), error);
     INFO(error);
     REQUIRE(engraver != nullptr);
 
@@ -313,9 +240,9 @@ TEST_CASE("window engraver coalesces rapid requests and publishes only the lates
     REQUIRE(wait_for_loads(state, 2));
     {
         std::lock_guard lock(state->mutex);
-        REQUIRE(state->loaded.size() == 2);
-        CHECK(state->loaded[0] == "first");
-        CHECK(state->loaded[1] == "latest");
+        REQUIRE(state->payloads.size() == 2);
+        CHECK(state->payloads[0] == "first");
+        CHECK(state->payloads[1] == "latest");
     }
     release_loads(state, 2);
 
@@ -336,9 +263,9 @@ TEST_CASE("window engraver coalesces rapid requests and publishes only the lates
 TEST_CASE("window engraver cancellation is non-blocking generation invalidation",
     "[scoreview][engraver][lifetime]")
 {
-    auto state = std::make_shared<BlockingEngineState>();
+    auto state = std::make_shared<FakeEngineState>();
     std::string error;
-    auto engraver = WindowEngraver::create(std::make_unique<BlockingLayoutEngine>(state), error);
+    auto engraver = WindowEngraver::create(make_blocking_failing_engine(state), error);
     REQUIRE(engraver != nullptr);
 
     WindowEngraver::Job job;
@@ -387,9 +314,9 @@ TEST_CASE("window engraver rejects a missing injected engine", "[scoreview][engr
 TEST_CASE("window engraver shutdown owns and joins an active engine job",
     "[scoreview][engraver][lifetime]")
 {
-    auto state = std::make_shared<BlockingEngineState>();
+    auto state = std::make_shared<FakeEngineState>();
     std::string error;
-    auto engraver = WindowEngraver::create(std::make_unique<BlockingLayoutEngine>(state), error);
+    auto engraver = WindowEngraver::create(make_blocking_failing_engine(state), error);
     REQUIRE(engraver != nullptr);
     WindowEngraver::Job job;
     job.window_xml = "shutdown";

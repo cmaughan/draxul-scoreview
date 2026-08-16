@@ -4,9 +4,11 @@
 // driving the real host without a window, renderer, audio device, user
 // dialog, or real Verovio toolkit. ScoreHostTestAccess is the ONE friend of
 // ScoreHost (declared in score_host.h) — its definition lives here so every
-// host-level suite shares it; DeterministicLayoutEngine is a blockable fake
-// engine whose load() gates on explicit permits, so worker interleavings are
-// driven, not raced.
+// host-level suite shares it. The blockable DeterministicLayoutEngine fake
+// (and its permit/wait helpers) lives in scoreview_engine_fake.h so suites
+// that cannot see controller internals share the same engine fake.
+
+#include "scoreview_engine_fake.h"
 
 #include <draxul/scoreview/player_input_rig.h>
 #include <draxul/scoreview/score_runtime.h>
@@ -189,111 +191,6 @@ public:
     }
 };
 
-// A blockable, deterministic fake layout engine: load() records its payload
-// and (optionally) waits until the test grants a permit, so tests control
-// exactly when a background engrave completes.
-struct FakeEngineState
-{
-    std::mutex mutex;
-    std::condition_variable changed;
-    int load_calls = 0;
-    int permits = 0;
-    std::vector<std::string> payloads;
-};
-
-class DeterministicLayoutEngine final : public ILayoutEngine
-{
-public:
-    DeterministicLayoutEngine(
-        std::shared_ptr<FakeEngineState> state, std::string svg, bool block_load,
-        bool require_timemap_for_midi = false)
-        : state_(std::move(state))
-        , svg_(std::move(svg))
-        , block_load_(block_load)
-        , require_timemap_for_midi_(require_timemap_for_midi)
-    {
-    }
-
-    bool load(std::string_view bytes, std::string& error) override
-    {
-        std::unique_lock lock(state_->mutex);
-        ++state_->load_calls;
-        const int call = state_->load_calls;
-        state_->payloads.emplace_back(bytes);
-        state_->changed.notify_all();
-        if (block_load_)
-            state_->changed.wait(lock, [&]() { return state_->permits >= call; });
-        loaded_ = true;
-        error.clear();
-        return true;
-    }
-
-    void set_options(const LayoutOptions&) override {}
-    bool is_loaded() const override
-    {
-        return loaded_;
-    }
-    int page_count() override
-    {
-        return loaded_ ? 1 : 0;
-    }
-    std::string render_page_svg(int page_number) override
-    {
-        return loaded_ && page_number == 1 ? svg_ : std::string{};
-    }
-    std::string render_timemap() override;
-    int midi_pitch_for_element(const std::string& element_id) override
-    {
-        if (require_timemap_for_midi_ && !timemap_rendered_)
-            return -1;
-        return element_id == "usfythd" ? 60 : -1;
-    }
-    int note_letter_for_element(const std::string& element_id) override
-    {
-        return element_id == "usfythd" ? 0 : -1;
-    }
-    std::vector<std::string> tie_end_ids() override
-    {
-        return {};
-    }
-
-private:
-    std::shared_ptr<FakeEngineState> state_;
-    std::string svg_;
-    bool block_load_ = false;
-    bool require_timemap_for_midi_ = false;
-    bool timemap_rendered_ = false;
-    bool loaded_ = false;
-};
-
-inline constexpr std::string_view kScoreHostFixtureMinimalScore
-    = R"xml(<?xml version="1.0" encoding="UTF-8"?>
-<score-partwise version="3.1">
-  <part-list><score-part id="P1"><part-name>Piano</part-name></score-part></part-list>
-  <part id="P1">
-    <measure number="1">
-      <attributes>
-        <divisions>1</divisions>
-        <key><fifths>0</fifths></key>
-        <time><beats>4</beats><beat-type>4</beat-type></time>
-        <clef><sign>G</sign><line>2</line></clef>
-      </attributes>
-      <note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note>
-    </measure>
-  </part>
-</score-partwise>)xml";
-
-inline constexpr std::string_view kScoreHostFixtureTimemap = R"json([
-  {"qstamp": 0, "tempo": 120, "on": ["usfythd"]},
-  {"qstamp": 4, "off": ["usfythd"]}
-])json";
-
-inline std::string DeterministicLayoutEngine::render_timemap()
-{
-    timemap_rendered_ = true;
-    return loaded_ ? std::string(kScoreHostFixtureTimemap) : std::string{};
-}
-
 inline std::string read_verovio_svg_fixture()
 {
     const auto path = std::filesystem::path(DRAXUL_PROJECT_ROOT)
@@ -304,20 +201,6 @@ inline std::string read_verovio_svg_fixture()
     std::ostringstream contents;
     contents << stream.rdbuf();
     return contents.str();
-}
-
-inline bool wait_for_loads(const std::shared_ptr<FakeEngineState>& state, int count)
-{
-    std::unique_lock lock(state->mutex);
-    return state->changed.wait_for(
-        lock, std::chrono::seconds(2), [&]() { return state->load_calls >= count; });
-}
-
-inline void release_loads(const std::shared_ptr<FakeEngineState>& state, int count)
-{
-    std::lock_guard lock(state->mutex);
-    state->permits = std::max(state->permits, count);
-    state->changed.notify_all();
 }
 
 inline bool wait_for_host_install(ScoreHost& host)
