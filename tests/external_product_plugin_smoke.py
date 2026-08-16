@@ -45,7 +45,9 @@ def copy_draxul_runtime_assets(draxul: pathlib.Path,
         destination = executable_dir.parent / "Resources"
         if source_resources.is_dir():
             shutil.copytree(source_resources, destination)
-        return
+    # On every platform the core runtime payloads (shaders, fonts, assets)
+    # live beside the executable — in Contents/MacOS inside the bundle — so
+    # copy them there too; Resources alone leaves the renderer shaderless.
     for name in ("assets", "fonts", "shaders"):
         source = draxul.parent / name
         if source.is_dir():
@@ -91,14 +93,18 @@ def main() -> int:
             args, external_build, "draxul-scoreview-plugin",
             parallel=min(12, max(2, os.cpu_count() or 2)), timeout=2400)
 
-        module = sdk_smoke.find_one(
-            external_build, sdk_smoke.shared_module_name("draxul-scoreview"))
+        # The standalone build may emit CMake's default MODULE suffix (.so on
+        # macOS); stage the module under the manifest's canonical platform
+        # library name so the plugin loader finds it.
+        module = sdk_smoke.find_shared_module(
+            external_build, "draxul-scoreview")
+        module_name = sdk_smoke.shared_module_name("draxul-scoreview")
         executable_dir, plugin_dir = sdk_smoke.stage_app_layout(
             temp, args.draxul, PLUGIN_ID)
         clean_draxul = executable_dir / args.draxul.name
         copy_draxul_runtime_assets(args.draxul, executable_dir)
         shutil.copy2(source / "plugin.toml", plugin_dir / "plugin.toml")
-        shutil.copy2(module, plugin_dir / module.name)
+        shutil.copy2(module, plugin_dir / module_name)
         verovio = sdk_smoke.find_one(external_build, verovio_name())
         shutil.copy2(verovio, plugin_dir / verovio.name)
         verovio_source = external_build / "_deps" / "verovio-src"
@@ -116,7 +122,7 @@ def main() -> int:
 
         env = sdk_smoke.isolated_env(temp)
         sdk_smoke.assert_plugin_loads(
-            clean_draxul, PLUGIN_ID, plugin_dir / module.name, env,
+            clean_draxul, PLUGIN_ID, plugin_dir / module_name, env,
             timeout=30)
 
         if args.render:
