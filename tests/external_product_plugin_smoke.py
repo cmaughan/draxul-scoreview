@@ -111,6 +111,10 @@ def main() -> int:
         shutil.copytree(source_root / "plugins" / "scoreview", source)
         shutil.copytree(source_root / "plugins" / "support" / "imgui",
                         copied_plugins / "support" / "imgui")
+        # The support ImGui target consumes the shared scancode/IImGuiHost
+        # leaf; standalone builds carry a copy of it beside support/imgui.
+        shutil.copytree(source_root / "libs" / "draxul-imgui-core",
+                        copied_plugins / "support" / "imgui-core")
 
         forbidden_roots = [temp / name for name in ("app", "libs", "modules")]
         if any(path.exists() for path in forbidden_roots):

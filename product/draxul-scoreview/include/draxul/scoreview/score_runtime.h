@@ -2,6 +2,7 @@
 
 #include <draxul/host.h>
 #include <draxul/nanovg_pass.h>
+#include <draxul/plugin_imgui_context.h>
 #include <draxul/notation/score_document.h>
 #include <draxul/scoreview/analysis_overlay.h>
 #include <draxul/scoreview/engraved_window.h>
@@ -427,8 +428,7 @@ private:
 
     // ImGui debug/learning inspector. Its own context (like the other 3D
     // hosts); a floating window drawn over the score, toggled with `\``.
-    ImGuiContext* imgui_context_ = nullptr;
-    draxul::IImGuiHost* imgui_backend_ = nullptr;
+    plugin_support::PluginImGuiContext imgui_;
     std::string imgui_font_path_;
     float imgui_font_size_pixels_ = 13.0f;
     bool show_debug_ui_ = true;

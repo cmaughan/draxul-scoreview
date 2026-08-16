@@ -75,11 +75,14 @@ target_include_directories(draxul-scoreview-runtime PUBLIC
 # offline-testable; only the microphone front-end touches a device.
 # DRAXUL_SCOREVIEW_SDL_TARGET is headers-only in bundled macOS builds, where
 # the plugin module resolves SDL symbols from the host executable at load.
+# The shared plugin ImGui target is PUBLIC because score_runtime.h owns a
+# PluginImGuiContext (the shared context/lifecycle from plugins/support/imgui).
 target_link_libraries(draxul-scoreview-runtime PUBLIC
     draxul-scoreview
     draxul-notation
     draxul-score-canvas
     draxul-score-runtime-support
+    ${DRAXUL_SCOREVIEW_IMGUI_TARGET}
     PRIVATE ${DRAXUL_SCOREVIEW_SDL_TARGET} imgui
 )
 

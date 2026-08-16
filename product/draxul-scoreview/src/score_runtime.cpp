@@ -3,6 +3,7 @@
 #include <draxul/scoreview/stream_composer.h>
 
 #include <draxul/imgui_host.h>
+#include <draxul/imgui_input_bridge.h>
 #include <draxul/log.h>
 #include <draxul/notation/musicxml_importer.h>
 #include <draxul/scoreview/keyboard_render_nvg.h>
@@ -11,7 +12,6 @@
 #include <draxul/scoreview/score_render_nvg.h>
 #include <draxul/scoreview/svg_score_interpreter.h>
 #include <draxul/scoreview/verovio_layout_engine.h>
-#include <draxul/sdl_imgui_input.h>
 
 #include <ctime>
 
@@ -272,16 +272,9 @@ bool ScoreRuntime::initialize(const HostContext& context,
 
     // The debug/learning inspector gets its own ImGui context (the pattern
     // the 3D hosts use). attach_imgui_host wires the backend once it exists.
-    IMGUI_CHECKVERSION();
-    imgui_context_ = ImGui::CreateContext();
-    if (imgui_context_ != nullptr)
-    {
-        ImGui::SetCurrentContext(imgui_context_);
-        ImGuiIO& io = ImGui::GetIO();
-        io.IniFilename = nullptr;
-        io.LogFilename = nullptr;
-        ImGui::StyleColorsDark();
-    }
+    // The shared defaults add docking and the IsSRGB flag, matching the other
+    // product panes' gamma handling.
+    imgui_.create();
     last_imgui_time_ = std::chrono::steady_clock::now();
 
     epoch_ = std::chrono::steady_clock::now();
@@ -302,18 +295,7 @@ void ScoreRuntime::shutdown()
     pages_.reset();
     engine_.reset();
     nanovg_pass_.reset();
-    if (imgui_backend_ != nullptr)
-    {
-        if (imgui_context_ != nullptr)
-            ImGui::SetCurrentContext(imgui_context_);
-        imgui_backend_->shutdown_imgui_backend();
-        imgui_backend_ = nullptr;
-    }
-    if (imgui_context_ != nullptr)
-    {
-        ImGui::DestroyContext(imgui_context_);
-        imgui_context_ = nullptr;
-    }
+    imgui_.destroy();
 }
 
 void ScoreRuntime::quiesce()
@@ -1704,8 +1686,8 @@ void ScoreRuntime::draw(ScoreFrameSink& frame)
     const float imgui_dt = std::chrono::duration<float>(imgui_now - last_imgui_time_).count();
     last_imgui_time_ = imgui_now;
     render_debug_ui(imgui_dt);
-    if (imgui_context_ != nullptr && imgui_backend_ != nullptr)
-        frame.render_overlay(ImGui::GetDrawData(), imgui_context_);
+    if (imgui_.active())
+        frame.render_overlay(ImGui::GetDrawData(), imgui_.context());
     frame.finish();
 }
 
@@ -1930,17 +1912,10 @@ void ScoreRuntime::apply_inspector_intents(const ScoreInspectorIntents& intents)
 
 void ScoreRuntime::on_key(const KeyEvent& event)
 {
-    if (imgui_context_ != nullptr)
+    if (imgui_.context() != nullptr)
     {
-        ImGui::SetCurrentContext(imgui_context_);
-        ImGuiIO& io = ImGui::GetIO();
-        io.AddKeyEvent(ImGuiMod_Ctrl, (event.mod & kModCtrl) != 0);
-        io.AddKeyEvent(ImGuiMod_Shift, (event.mod & kModShift) != 0);
-        io.AddKeyEvent(ImGuiMod_Alt, (event.mod & kModAlt) != 0);
-        io.AddKeyEvent(ImGuiMod_Super, (event.mod & kModSuper) != 0);
-        const ImGuiKey imkey = sdl_scancode_to_imgui_key(event.scancode);
-        if (imkey != ImGuiKey_None)
-            io.AddKeyEvent(imkey, event.pressed);
+        const bool imgui_captured =
+            plugin_support::ImGuiInputBridge::route_key(imgui_.context(), event);
         // The backtick always toggles the inspector, even with ImGui focused.
         if (event.pressed && event.keycode == SDLK_GRAVE)
         {
@@ -1949,7 +1924,7 @@ void ScoreRuntime::on_key(const KeyEvent& event)
                 callbacks_->request_frame();
             return;
         }
-        if (io.WantCaptureKeyboard)
+        if (imgui_captured)
         {
             if (callbacks_ != nullptr)
                 callbacks_->request_frame();
@@ -2063,90 +2038,48 @@ void ScoreRuntime::on_key(const KeyEvent& event)
 
 void ScoreRuntime::on_mouse_wheel(const MouseWheelEvent& event)
 {
-    if (imgui_context_ != nullptr)
+    if (plugin_support::ImGuiInputBridge::route_mouse_wheel(imgui_.context(), event))
     {
-        ImGui::SetCurrentContext(imgui_context_);
-        ImGui::GetIO().AddMouseWheelEvent(event.delta.x, event.delta.y);
-        if (ImGui::GetIO().WantCaptureMouse)
-        {
-            if (callbacks_ != nullptr)
-                callbacks_->request_frame();
-            return;
-        }
+        if (callbacks_ != nullptr)
+            callbacks_->request_frame();
+        return;
     }
     scroll_by(-event.delta.y * 40.0f * ui_scale());
 }
 
 void ScoreRuntime::on_mouse_button(const MouseButtonEvent& event)
 {
-    if (imgui_context_ == nullptr)
+    if (imgui_.context() == nullptr)
         return;
-    ImGui::SetCurrentContext(imgui_context_);
-    int button = -1;
-    switch (event.button)
-    {
-    case 1:
-        button = 0; // left
-        break;
-    case 2:
-        button = 2; // middle
-        break;
-    case 3:
-        button = 1; // right
-        break;
-    default:
-        break;
-    }
-    if (button >= 0)
-        ImGui::GetIO().AddMouseButtonEvent(button, event.pressed);
+    plugin_support::ImGuiInputBridge::route_mouse_button(imgui_.context(), event);
     if (callbacks_ != nullptr)
         callbacks_->request_frame();
 }
 
 void ScoreRuntime::on_mouse_move(const MouseMoveEvent& event)
 {
-    if (imgui_context_ == nullptr)
+    if (imgui_.context() == nullptr)
         return;
-    ImGui::SetCurrentContext(imgui_context_);
-    ImGui::GetIO().AddMousePosEvent(
-        static_cast<float>(event.pos.x), static_cast<float>(event.pos.y));
+    plugin_support::ImGuiInputBridge::route_mouse_move(imgui_.context(), event);
     if (callbacks_ != nullptr)
         callbacks_->request_frame();
 }
 
 void ScoreRuntime::on_text_input(const TextInputEvent& event)
 {
-    if (imgui_context_ == nullptr || event.text.empty())
-        return;
-    ImGui::SetCurrentContext(imgui_context_);
-    ImGui::GetIO().AddInputCharactersUTF8(event.text.c_str());
+    plugin_support::ImGuiInputBridge::route_text(imgui_.context(), event);
 }
 
 void ScoreRuntime::attach_imgui_host(IImGuiHost& host)
 {
-    imgui_backend_ = &host;
-    if (imgui_context_ == nullptr)
-        return;
-    ImGui::SetCurrentContext(imgui_context_);
-    host.initialize_imgui_backend();
-    host.rebuild_imgui_font_texture();
+    imgui_.attach_host(host);
 }
 
 void ScoreRuntime::set_imgui_font(const std::string& path, float size_pixels)
 {
     imgui_font_path_ = path;
     imgui_font_size_pixels_ = size_pixels;
-    if (imgui_context_ == nullptr)
-        return;
-    ImGui::SetCurrentContext(imgui_context_);
-    ImGuiIO& io = ImGui::GetIO();
-    io.Fonts->Clear();
-    if (!imgui_font_path_.empty() && imgui_font_size_pixels_ > 0.0f)
-        io.Fonts->AddFontFromFileTTF(imgui_font_path_.c_str(), imgui_font_size_pixels_);
-    if (io.Fonts->Fonts.empty())
-        io.Fonts->AddFontDefault();
-    if (imgui_backend_ != nullptr)
-        imgui_backend_->rebuild_imgui_font_texture();
+    imgui_.set_font(imgui_font_path_, imgui_font_size_pixels_);
 }
 
 bool ScoreRuntime::dispatch_action(std::string_view action)

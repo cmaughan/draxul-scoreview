@@ -31,17 +31,9 @@ namespace scoreview
 
 void ScoreRuntime::render_debug_ui(float dt)
 {
-    if (imgui_context_ == nullptr || imgui_backend_ == nullptr)
+    if (!imgui_.begin_frame(viewport_.pixel_pos.x, viewport_.pixel_pos.y,
+            viewport_.pixel_size.x, viewport_.pixel_size.y, dt))
         return;
-    ImGui::SetCurrentContext(imgui_context_);
-    imgui_backend_->begin_imgui_frame();
-    ImGuiIO& io = ImGui::GetIO();
-    const int pw = std::max(1, viewport_.pixel_size.x);
-    const int ph = std::max(1, viewport_.pixel_size.y);
-    io.DisplaySize = ImVec2(static_cast<float>(viewport_.pixel_pos.x + pw),
-        static_cast<float>(viewport_.pixel_pos.y + ph));
-    io.DeltaTime = dt > 0.0f ? dt : (1.0f / 60.0f);
-    ImGui::NewFrame();
 
     const ScoreViewModel view = build_view_model();
     ScoreInspectorIntents intents;

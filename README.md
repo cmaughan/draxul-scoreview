@@ -94,8 +94,10 @@ When this repository is the top-level CMake source directory, the build sets
 `find_package(DraxulPluginSDK CONFIG REQUIRED)` — point `CMAKE_PREFIX_PATH` at a
 prefix where Draxul's `draxul-plugin-sdk` install component has been installed.
 Standalone builds also expect the copied `plugins/support/imgui` tree from Draxul
-at `../support/imgui` relative to this checkout (the extraction smoke test stages
-it exactly this way).
+at `../support/imgui` relative to this checkout, plus Draxul's
+`libs/draxul-imgui-core` copied to `../support/imgui-core` (the shared
+scancode/IImGuiHost leaf the support ImGui target consumes; the extraction smoke
+test stages both exactly this way).
 
 The extraction smoke test, `tests/external_product_plugin_smoke.py`, proves this
 path end to end: it installs the SDK component from a Draxul build, copies this
