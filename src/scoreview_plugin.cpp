@@ -179,9 +179,8 @@ void* create_instance(const DraxulPluginCreateInfoV2* info)
         return nullptr;
     }
 
-    draxul::HostContext context;
+    draxul::PluginRuntimeContext context;
     context.launch_options.source_path = source;
-    context.launch_options.command = mode;
     context.initial_viewport.pixel_pos = {
         info->initial_viewport.x, info->initial_viewport.y };
     context.initial_viewport.pixel_size = {
@@ -197,7 +196,7 @@ void* create_instance(const DraxulPluginCreateInfoV2* info)
     draxul::set_nanovg_asset_root(instance->directory);
     instance->runtime = std::make_unique<draxul::scoreview::ScoreRuntime>();
     if (!instance->runtime->initialize(context, instance->callbacks,
-            std::move(paths)))
+            std::move(paths), mode))
     {
         const std::string error = "ScoreView initialization failed: "
             + instance->runtime->init_error();
@@ -236,7 +235,7 @@ void set_viewport(void* opaque, const DraxulPluginViewportV2* viewport)
     if (!instance || !viewport)
         return;
     instance->viewport = *viewport;
-    draxul::HostViewport value;
+    draxul::PluginRuntimeViewport value;
     value.pixel_pos = { viewport->x, viewport->y };
     value.pixel_size = { viewport->width, viewport->height };
     value.pixel_scale = viewport->pixel_scale;

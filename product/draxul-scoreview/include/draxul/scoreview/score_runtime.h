@@ -1,7 +1,7 @@
 #pragma once
 
-#include <draxul/host.h>
 #include <draxul/nanovg_pass.h>
+#include <draxul/plugin_runtime.h>
 #include <draxul/plugin_imgui_context.h>
 #include <draxul/notation/score_document.h>
 #include <draxul/scoreview/analysis_overlay.h>
@@ -77,14 +77,28 @@ struct ScoreRuntimePaths
     std::shared_ptr<IScoreDeviceLeaseProvider> device_leases;
 };
 
+// Print-affordance hint: the content crop and paper-white request the host's
+// print path consumes. Product-owned (the shared PluginRuntime vocabulary has
+// no print concept).
+struct ScorePrintHint
+{
+    glm::ivec2 content_pos{ 0 };
+    glm::ivec2 content_size{ 0 };
+    bool paper_white = false;
+};
+
 class ScoreRuntime
 {
 public:
     ScoreRuntime();
     ~ScoreRuntime();
 
-    bool initialize(const draxul::HostContext& context,
-        ScoreRuntimeCallbacks& callbacks, ScoreRuntimePaths paths = {});
+    // `mode` carries the launch command tokens (`paged`, `flow`, `gate*`,
+    // `roll-mic`, ...) that the forked HostLaunchOptions::command used to
+    // hold; the shared PluginRuntimeLaunchOptions has no such field.
+    bool initialize(const draxul::PluginRuntimeContext& context,
+        ScoreRuntimeCallbacks& callbacks, ScoreRuntimePaths paths = {},
+        std::string mode = {});
     void quiesce();
     void shutdown();
     bool is_running() const;
@@ -93,10 +107,9 @@ public:
         return init_error_;
     }
 
-    void set_viewport(const draxul::HostViewport& viewport);
+    void set_viewport(const draxul::PluginRuntimeViewport& viewport);
     void set_presentation_visible(bool visible,
         bool allow_background_playback = false);
-    void on_config_reloaded(const draxul::HostReloadConfig& config);
     void pump();
     void draw(ScoreFrameSink& frame);
     std::optional<std::chrono::steady_clock::time_point> next_deadline() const;
@@ -113,9 +126,9 @@ public:
     void request_close();
     std::string status_text() const;
     draxul::Color default_background() const;
-    draxul::HostRuntimeState runtime_state() const;
-    draxul::HostDebugState debug_state() const;
-    draxul::HostPrintHint print_hint() const;
+    draxul::PluginRuntimeState runtime_state() const;
+    draxul::PluginDebugState debug_state() const;
+    ScorePrintHint print_hint() const;
     draxul::INanoVGPass* canvas_pass() const
     {
         return nanovg_pass_.get();
@@ -267,7 +280,7 @@ private:
     void apply_inspector_intents(const ScoreInspectorIntents& intents);
 
     std::unique_ptr<draxul::INanoVGPass> nanovg_pass_;
-    draxul::HostViewport viewport_;
+    draxul::PluginRuntimeViewport viewport_;
     ScoreRuntimeCallbacks* callbacks_ = nullptr;
 
     std::string source_path_;

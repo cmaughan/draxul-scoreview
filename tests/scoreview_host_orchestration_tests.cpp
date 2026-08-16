@@ -15,7 +15,7 @@
 #include <draxul/scoreview/progress_store.h>
 #include <draxul/scoreview/score_device_lease.h>
 
-#include <draxul/host.h>
+#include <draxul/plugin_runtime.h>
 
 #include <fstream>
 #include <memory>
@@ -24,8 +24,8 @@
 namespace
 {
 
-using draxul::HostContext;
-using draxul::HostViewport;
+using draxul::PluginRuntimeContext;
+using draxul::PluginRuntimeViewport;
 using draxul::scoreview::CountingHostCallbacks;
 using draxul::scoreview::DeterministicLayoutEngine;
 using draxul::scoreview::FakeEngineState;
@@ -42,9 +42,9 @@ using draxul::scoreview::ScoreSessionController;
 using draxul::scoreview::wait_for_loads;
 using draxul::scoreview::WindowEngraver;
 
-HostViewport viewport(int w, int h)
+PluginRuntimeViewport viewport(int w, int h)
 {
-    HostViewport view;
+    PluginRuntimeViewport view;
     view.pixel_size = { w, h };
     view.pixel_scale = 1.0f;
     return view;
@@ -77,7 +77,7 @@ TEST_CASE("a sourceless host runs one full headless lifecycle",
     auto callbacks = std::make_unique<CountingHostCallbacks>();
     auto host = std::make_unique<ScoreHost>();
 
-    HostContext context;
+    PluginRuntimeContext context;
     context.initial_viewport = viewport(800, 600);
     REQUIRE(host->initialize(context, *callbacks));
     CHECK(host->is_running());
@@ -112,7 +112,7 @@ TEST_CASE("a missing source fails initialize cleanly and shutdown stays safe",
     CountingHostCallbacks callbacks;
     ScoreHost host;
 
-    HostContext context;
+    PluginRuntimeContext context;
     context.initial_viewport = viewport(640, 480);
     context.launch_options.source_path = "/nonexistent/draxul-test-piece.musicxml";
     REQUIRE_FALSE(host.initialize(context, callbacks));

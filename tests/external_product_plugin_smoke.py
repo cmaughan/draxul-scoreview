@@ -69,7 +69,9 @@ def copy_draxul_runtime_assets(draxul: pathlib.Path,
         destination = executable_dir.parent / "Resources"
         if source_resources.is_dir():
             shutil.copytree(source_resources, destination)
-        return
+    # Fonts, compiled shader libraries, and assets live beside the executable
+    # on every platform (macOS: Contents/MacOS/{fonts,shaders}); without them
+    # the staged host cannot initialize its renderer for the render check.
     for name in ("assets", "fonts", "shaders"):
         source = draxul.parent / name
         if source.is_dir():
@@ -115,6 +117,11 @@ def main() -> int:
         # leaf; standalone builds carry a copy of it beside support/imgui.
         shutil.copytree(source_root / "libs" / "draxul-imgui-core",
                         copied_plugins / "support" / "imgui-core")
+        # The NanoVG core + Vulkan/Metal backends (and their GLSL shaders)
+        # come from the shared Draxul NanoVG tree; standalone builds compile
+        # its backend half from a copy staged beside support/imgui.
+        shutil.copytree(source_root / "libs" / "draxul-nanovg",
+                        copied_plugins / "support" / "nanovg")
 
         forbidden_roots = [temp / name for name in ("app", "libs", "modules")]
         if any(path.exists() for path in forbidden_roots):
@@ -218,6 +225,9 @@ def main() -> int:
             render_command.extend([
                 "--render-test", str(scenario),
                 "--export-render-test", str(rendered),
+                # Keep host-side diagnostics in the captured stderr so a
+                # failing staged render explains itself.
+                "--log-level", "debug",
             ])
             print("+", subprocess.list2cmdline(render_command), flush=True)
             rendered_process = subprocess.run(

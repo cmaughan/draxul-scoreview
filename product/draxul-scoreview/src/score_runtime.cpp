@@ -81,14 +81,13 @@ bool ScoreRuntime::stream_active() const
 
 ScoreRuntime::~ScoreRuntime() = default;
 
-bool ScoreRuntime::initialize(const HostContext& context,
-    ScoreRuntimeCallbacks& callbacks, ScoreRuntimePaths paths)
+bool ScoreRuntime::initialize(const PluginRuntimeContext& context,
+    ScoreRuntimeCallbacks& callbacks, ScoreRuntimePaths paths, std::string mode)
 {
     quiesced_ = false;
     viewport_ = context.initial_viewport;
     callbacks_ = &callbacks;
     source_path_ = context.launch_options.source_path;
-    background_ = context.launch_options.terminal_bg.value_or(background_);
     device_leases_ = paths.device_leases
         ? std::move(paths.device_leases) : process_score_device_leases();
 
@@ -189,7 +188,7 @@ bool ScoreRuntime::initialize(const HostContext& context,
         start_in_gate_ = true;
         gate_input_requested_ = GateInput::Keyboard;
         game_mode_ = FlowController::TransportMode::Roll;
-        const std::string& command = context.launch_options.command;
+        const std::string& command = mode;
         if (command.find("paged") != std::string::npos)
         {
             view_mode_ = ViewMode::Paged;
@@ -318,7 +317,7 @@ bool ScoreRuntime::is_running() const
     return running_;
 }
 
-void ScoreRuntime::set_viewport(const HostViewport& viewport)
+void ScoreRuntime::set_viewport(const PluginRuntimeViewport& viewport)
 {
     const bool size_changed = viewport.pixel_size != viewport_.pixel_size || viewport.pixel_scale != viewport_.pixel_scale;
     viewport_ = viewport;
@@ -361,12 +360,6 @@ void ScoreRuntime::set_presentation_visible(bool visible,
         if (visible)
             callbacks_->request_frame();
     }
-}
-
-void ScoreRuntime::on_config_reloaded(const HostReloadConfig& config)
-{
-    if (config.terminal_bg)
-        background_ = *config.terminal_bg;
 }
 
 float ScoreRuntime::ui_scale() const
@@ -2212,26 +2205,26 @@ Color ScoreRuntime::default_background() const
     return background_;
 }
 
-HostRuntimeState ScoreRuntime::runtime_state() const
+PluginRuntimeState ScoreRuntime::runtime_state() const
 {
-    HostRuntimeState state;
+    PluginRuntimeState state;
     state.content_ready = running_ && (!engine_ || pages_ != nullptr);
     return state;
 }
 
-HostDebugState ScoreRuntime::debug_state() const
+PluginDebugState ScoreRuntime::debug_state() const
 {
-    HostDebugState state;
+    PluginDebugState state;
     state.name = "ScoreView";
     return state;
 }
 
-HostPrintHint ScoreRuntime::print_hint() const
+ScorePrintHint ScoreRuntime::print_hint() const
 {
     // Print the music, not the pane furniture: crop away the mid-gray
     // backdrop around the page/band, and snap the screen-tuned warm sheet
     // tint to paper white (it prints as visible stipple otherwise).
-    HostPrintHint hint;
+    ScorePrintHint hint;
     hint.paper_white = true;
     const float vw = static_cast<float>(viewport_.pixel_size.x);
     const float vh = static_cast<float>(viewport_.pixel_size.y);
