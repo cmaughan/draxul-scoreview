@@ -72,6 +72,14 @@ target_link_libraries(draxul-scoreview-plugin PRIVATE
     ${DRAXUL_SCOREVIEW_IMGUI_TARGET}
     nlohmann_json::nlohmann_json
     imgui)
+# The adapter shell header (draxul/plugin_adapter.h) is header-only. Bundled
+# builds take its include directory from the support target; the standalone
+# extraction finds the same header in the installed SDK include tree via
+# Draxul::PluginSDK.
+if(NOT DRAXUL_SCOREVIEW_STANDALONE)
+    target_link_libraries(draxul-scoreview-plugin PRIVATE
+        Draxul::PluginSupport::Adapter)
+endif()
 if(APPLE)
     target_link_libraries(draxul-scoreview-plugin PRIVATE
         "-framework Metal" "-framework Foundation")

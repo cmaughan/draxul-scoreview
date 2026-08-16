@@ -1,4 +1,5 @@
 #include <draxul/nanovg_pass.h>
+#include <draxul/plugin_adapter.h>
 #include <draxul/plugin_api.h>
 #include <draxul/plugin_gpu_imgui.h>
 #include <draxul/scoreview/score_runtime.h>
@@ -16,8 +17,16 @@
 namespace
 {
 
+// The adapter shell (result factories, config parse, action registrar, kApi
+// assembly) comes from draxul/plugin_adapter.h — header-only, so it is also
+// available to the standalone extraction build through the installed SDK.
+// kActiveDelayNs is the shared ~60 Hz frame delay.
+using draxul::plugin_support::kFrameDelayNs;
+using draxul::plugin_support::render_result;
+using draxul::plugin_support::tick_result;
+
 constexpr const char* kPluginId = "dev.draxul.scoreview";
-constexpr uint64_t kActiveDelayNs = 16'666'667;
+constexpr uint64_t kActiveDelayNs = kFrameDelayNs;
 constexpr uint64_t kWorkerDelayNs = 100'000'000;
 
 class RuntimeCallbacks final
@@ -98,6 +107,9 @@ void FrameSink::record_canvas(draxul::INanoVGPass& pass,
         ok_ = pass.render_metal(*metal_) && ok_;
 }
 
+// Raw path-service reader (guarded variant: required==0 can never underflow
+// the resize). This stays hand-rolled rather than using HostServices because
+// the standalone extraction build links only the installed SDK.
 std::string service_path(DraxulPluginPathServiceV2& service,
     uint32_t kind)
 {
@@ -109,31 +121,14 @@ std::string service_path(DraxulPluginPathServiceV2& service,
     if (!service.get_path(service.service_context, kind,
             value.data(), &required))
         return {};
-    value.resize(required - 1);
+    value.resize(required > 0 ? required - 1 : 0);
     return value;
 }
 
 void synchronize_ui_style(Instance& instance)
 {
-    if (instance.runtime)
-    {
-        if (const auto font = instance.ui_style.poll())
-            instance.runtime->set_imgui_font(font->path, font->size_pixels);
-    }
-}
-
-DraxulPluginTickResultV2 tick_result(bool ok, uint64_t delay,
-    bool redraw = false, const char* error = nullptr)
-{
-    return { sizeof(DraxulPluginTickResultV2), delay,
-        redraw ? 1 : 0, ok ? 1 : 0, error };
-}
-
-DraxulPluginRenderResultV2 render_result(bool ok,
-    const char* error = nullptr)
-{
-    return { sizeof(DraxulPluginRenderResultV2),
-        DRAXUL_PLUGIN_NO_DEADLINE, ok ? 1 : 0, error };
+    draxul::plugin_support::synchronize_ui_style(
+        instance.ui_style, instance.runtime.get());
 }
 
 void* create_instance(const DraxulPluginCreateInfoV2* info)
@@ -163,16 +158,15 @@ void* create_instance(const DraxulPluginCreateInfoV2* info)
 
     std::string source;
     std::string mode = "paged";
+    const auto config = draxul::plugin_support::parse_config_json(*info);
+    if (!config)
+        return nullptr;
     try
     {
-        const auto config = nlohmann::json::parse(
-            info->config_json ? info->config_json : "{}",
-            info->config_json
-                ? info->config_json + info->config_json_length : "{}" + 2);
-        source = config.value("source", std::string{});
-        mode = config.value("mode", mode);
+        source = config->value("source", std::string{});
+        mode = config->value("mode", mode);
         instance->background_playback
-            = config.value("background_playback", false);
+            = config->value("background_playback", false);
     }
     catch (...)
     {
@@ -392,42 +386,31 @@ int32_t dispatch_action(void* opaque, const char* action, size_t length)
         std::string_view(action, length)) ? 1 : 0;
 }
 
-constexpr std::string_view kActions[] = {
-    "font_increase", "font_decrease", "font_reset" };
-constexpr std::string_view kActionNames[] = {
-    "Zoom In", "Zoom Out", "Reset Zoom" };
-size_t action_count(void*) { return std::size(kActions); }
-int32_t action_at(void*, size_t index, DraxulPluginStringViewV2* id,
-    DraxulPluginStringViewV2* name)
-{
-    if (!id || !name || index >= std::size(kActions))
-        return 0;
-    *id = { kActions[index].data(), kActions[index].size() };
-    *name = { kActionNames[index].data(), kActionNames[index].size() };
-    return 1;
-}
-int32_t query_extension(void*, const char* id, size_t length,
-    uint32_t version, void* table, size_t table_size)
-{
-    if (!id || !table || std::string_view(id, length)
-            != DRAXUL_PLUGIN_PRESENTATION_EXTENSION_ID
-        || version != DRAXUL_PLUGIN_PRESENTATION_EXTENSION_VERSION
-        || table_size < sizeof(DraxulPluginPresentationExtensionV2))
-        return 0;
-    auto* extension = static_cast<DraxulPluginPresentationExtensionV2*>(table);
-    *extension = { sizeof(*extension),
-        DRAXUL_PLUGIN_PRESENTATION_EXTENSION_VERSION, &get_state,
-        &dispatch_action, &action_count, &action_at };
-    return 1;
-}
+constexpr draxul::plugin_support::AdapterAction kActions[] = {
+    { "font_increase", "Zoom In" },
+    { "font_decrease", "Zoom Out" },
+    { "font_reset", "Reset Zoom" },
+};
 
-const DraxulPluginApiV2 kApi{
-    sizeof(DraxulPluginApiV2), DRAXUL_PLUGIN_ABI_VERSION,
-    kPluginId, "ScoreView", "0.1.0",
-    DRAXUL_PLUGIN_BACKEND_VULKAN | DRAXUL_PLUGIN_BACKEND_METAL,
-    &create_instance, &quiesce_instance, &destroy_instance,
-    &set_viewport, &set_visible, &set_focused, &handle_input, &tick,
-    &render_vulkan, &render_metal, &query_extension };
+using Presentation = draxul::plugin_support::PresentationAdapter<kActions,
+    &get_state, &dispatch_action>;
+
+const DraxulPluginApiV2 kApi = draxul::plugin_support::make_plugin_api(
+    { kPluginId, "ScoreView", "0.1.0",
+        DRAXUL_PLUGIN_BACKEND_VULKAN | DRAXUL_PLUGIN_BACKEND_METAL },
+    {
+        .create_instance = &create_instance,
+        .quiesce_instance = &quiesce_instance,
+        .destroy_instance = &destroy_instance,
+        .set_viewport = &set_viewport,
+        .set_visible = &set_visible,
+        .set_focused = &set_focused,
+        .handle_input = &handle_input,
+        .tick = &tick,
+        .render_vulkan = &render_vulkan,
+        .render_metal = &render_metal,
+        .query_extension = &Presentation::query_extension,
+    });
 
 } // namespace
 
