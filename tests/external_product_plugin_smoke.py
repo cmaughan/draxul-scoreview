@@ -150,6 +150,7 @@ def main() -> int:
                     "width = 960",
                     "height = 640",
                     "settle_ms = 1200",
+                    "timeout_ms = 60000",
                     'commands = [""]',
                     "",
                 ]), encoding="utf-8")
