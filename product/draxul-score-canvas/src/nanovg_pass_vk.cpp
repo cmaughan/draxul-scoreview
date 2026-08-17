@@ -1,6 +1,5 @@
-#include "nanovg_vk.h"
-
 #include <draxul/nanovg_pass.h>
+#include <draxul/nanovg_vk.h>
 
 #include "nanovg.h"
 
@@ -10,6 +9,11 @@
 
 namespace draxul
 {
+
+void set_nanovg_asset_root(const std::filesystem::path& root)
+{
+    nvgVkSetShaderRoot(root / "shaders");
+}
 
 class VulkanNanoVGPass final : public INanoVGPass
 {

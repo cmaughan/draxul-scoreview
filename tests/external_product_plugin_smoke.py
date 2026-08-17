@@ -78,6 +78,11 @@ def main() -> int:
         # leaf; standalone builds carry a copy of it beside support/imgui.
         shutil.copytree(source_root / "libs" / "draxul-imgui-core",
                         copied_plugins / "support" / "imgui-core")
+        # The NanoVG core + Vulkan/Metal backends (and their GLSL shaders)
+        # come from the shared Draxul NanoVG tree; standalone builds compile
+        # its backend half from a copy staged beside support/imgui.
+        shutil.copytree(source_root / "libs" / "draxul-nanovg",
+                        copied_plugins / "support" / "nanovg")
 
         forbidden_roots = [temp / name for name in ("app", "libs", "modules")]
         if any(path.exists() for path in forbidden_roots):

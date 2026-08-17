@@ -40,8 +40,64 @@ if(DRAXUL_SCOREVIEW_STANDALONE)
             "${CMAKE_CURRENT_BINARY_DIR}/plugin-imgui")
     endif()
     set(DRAXUL_SCOREVIEW_IMGUI_TARGET Draxul::PluginImGui)
+
+    # The shared foundation types ship with the installed plugin SDK as plain
+    # archives (draxul-types plus the draxul-performance archive its
+    # PERF_MEASURE spans reference); the headers ride the SDK include
+    # directory that Draxul::PluginSDK already exports.
+    if(NOT TARGET draxul-types)
+        find_library(DRAXUL_SCOREVIEW_TYPES_LIBRARY NAMES draxul-types REQUIRED)
+        find_library(DRAXUL_SCOREVIEW_PERFORMANCE_LIBRARY
+            NAMES draxul-performance REQUIRED)
+        add_library(draxul-performance STATIC IMPORTED GLOBAL)
+        set_target_properties(draxul-performance PROPERTIES
+            IMPORTED_LOCATION "${DRAXUL_SCOREVIEW_PERFORMANCE_LIBRARY}")
+        add_library(draxul-types STATIC IMPORTED GLOBAL)
+        set_target_properties(draxul-types PROPERTIES
+            IMPORTED_LOCATION "${DRAXUL_SCOREVIEW_TYPES_LIBRARY}")
+        target_link_libraries(draxul-types INTERFACE
+            Draxul::PluginSDK glm::glm draxul-performance)
+    endif()
+    set(DRAXUL_SCOREVIEW_TYPES_TARGET draxul-types)
+
+    # The NanoVG core + Vulkan/Metal backends: a standalone extraction carries
+    # a copy of libs/draxul-nanovg beside this tree and builds only its
+    # backend half (the pass half needs draxul-renderer).
+    if(NOT TARGET draxul-nanovg-backend)
+        if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../support/nanovg/CMakeLists.txt")
+            message(FATAL_ERROR
+                "ScoreView standalone builds require the copied libs/draxul-nanovg "
+                "tree beside this directory as support/nanovg.")
+        endif()
+        set(DRAXUL_NANOVG_BACKEND_ONLY ON)
+        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../support/nanovg"
+            "${CMAKE_CURRENT_BINARY_DIR}/nanovg-backend")
+    endif()
+    set(DRAXUL_SCOREVIEW_NANOVG_TARGET draxul-nanovg-backend)
+
+    if(NOT APPLE)
+        # Core's shared VMA implementation TU
+        # (Draxul::PluginSupport::VulkanResources) is not installed with the
+        # SDK, so a standalone extraction compiles its own copy of the
+        # two-line implementation unit.
+        set(DRAXUL_SCOREVIEW_VMA_IMPL
+            "${CMAKE_CURRENT_BINARY_DIR}/scoreview_vma_impl.cpp")
+        file(WRITE "${DRAXUL_SCOREVIEW_VMA_IMPL}"
+            "#define VMA_IMPLEMENTATION\n#include <vk_mem_alloc.h>\n")
+        add_library(draxul-scoreview-vma-impl STATIC
+            "${DRAXUL_SCOREVIEW_VMA_IMPL}")
+        target_link_libraries(draxul-scoreview-vma-impl PRIVATE
+            Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator)
+        set(DRAXUL_SCOREVIEW_VULKAN_RESOURCES_TARGET draxul-scoreview-vma-impl)
+    endif()
 else()
     set(DRAXUL_SCOREVIEW_IMGUI_TARGET Draxul::PluginSupport::ImGui)
+    set(DRAXUL_SCOREVIEW_TYPES_TARGET Draxul::PluginSupport::Types)
+    set(DRAXUL_SCOREVIEW_NANOVG_TARGET Draxul::PluginSupport::NanoVG)
+    if(NOT APPLE)
+        set(DRAXUL_SCOREVIEW_VULKAN_RESOURCES_TARGET
+            Draxul::PluginSupport::VulkanResources)
+    endif()
 endif()
 
 # SDL linkage differs by build flavor. Standalone builds and Windows embed the
@@ -90,10 +146,18 @@ if(APPLE)
     endif()
 else()
     target_link_libraries(draxul-scoreview-plugin PRIVATE Vulkan::Vulkan)
+    # The NanoVG GLSL sources live beside the shared backend (bundled builds:
+    # libs/draxul-nanovg/shaders; standalone: the staged support/nanovg copy).
+    get_target_property(SCOREVIEW_NANOVG_SHADER_DIR
+        ${DRAXUL_SCOREVIEW_NANOVG_TARGET} DRAXUL_NANOVG_SHADER_DIR)
+    if(NOT SCOREVIEW_NANOVG_SHADER_DIR)
+        message(FATAL_ERROR
+            "The NanoVG backend target does not expose DRAXUL_NANOVG_SHADER_DIR")
+    endif()
     set(SCOREVIEW_PLUGIN_SHADER_OUTPUTS)
     foreach(SCOREVIEW_SHADER_NAME nanovg.vert nanovg.frag)
         set(SCOREVIEW_SHADER_SOURCE
-            "${CMAKE_CURRENT_SOURCE_DIR}/shaders/${SCOREVIEW_SHADER_NAME}")
+            "${SCOREVIEW_NANOVG_SHADER_DIR}/${SCOREVIEW_SHADER_NAME}")
         set(SCOREVIEW_SHADER_OUTPUT
             "${CMAKE_CURRENT_BINARY_DIR}/${SCOREVIEW_SHADER_NAME}.spv")
         add_custom_command(OUTPUT "${SCOREVIEW_SHADER_OUTPUT}"
@@ -112,6 +176,23 @@ endif()
 set_target_properties(draxul-scoreview-plugin PROPERTIES
     PREFIX ""
     OUTPUT_NAME "draxul-scoreview")
+if(APPLE)
+    # CMake gives MODULE libraries a .so suffix on macOS by default, while
+    # Draxul's macOS plugin contract and this plugin's manifest use .dylib.
+    # Bundled builds get this from draxul_register_bundled_plugin; standalone
+    # extractions must set it themselves so the module matches the manifest.
+    set_target_properties(draxul-scoreview-plugin PROPERTIES SUFFIX ".dylib")
+    if(DRAXUL_SCOREVIEW_STANDALONE)
+        # Export only the C ABI entry point, exactly as
+        # draxul_register_bundled_plugin does for bundled modules. Without
+        # this, ImGui's inline functions are coalescible weak externals and
+        # dyld unifies them with the host executable's at load — the module's
+        # ImGui then reads the host's ImGui context and crashes (the
+        # SetCurrentFont "font && font->IsLoaded()" assertion).
+        target_link_options(draxul-scoreview-plugin PRIVATE
+            "LINKER:-exported_symbol,_draxul_plugin_query_v2")
+    endif()
+endif()
 
 if(NOT DRAXUL_SCOREVIEW_STANDALONE)
     set(_scoreview_product_targets
@@ -125,6 +206,10 @@ if(NOT DRAXUL_SCOREVIEW_STANDALONE)
         draxul-scoreview-runtime
         draxul-scoreview-plugin)
     foreach(_target IN LISTS _scoreview_product_targets)
+        get_target_property(_scoreview_target_type ${_target} TYPE)
+        if(_scoreview_target_type STREQUAL "INTERFACE_LIBRARY")
+            continue()
+        endif()
         if(COMMAND draxul_apply_sanitizers)
             draxul_apply_sanitizers(${_target})
             draxul_apply_coverage(${_target})

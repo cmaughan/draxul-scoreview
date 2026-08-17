@@ -41,10 +41,10 @@ FetchContent_Declare(tinyxml2
 set(tinyxml2_BUILD_TESTING OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(tinyxml2)
 
-FetchContent_Declare(nanovg
-    GIT_REPOSITORY https://github.com/memononen/nanovg.git
-    GIT_TAG ce3bf745eb2d2dbc14a50bf2446783f691ac4353)
-FetchContent_MakeAvailable(nanovg)
+# NanoVG (core source + Draxul's Vulkan/Metal backends) comes from the shared
+# Draxul NanoVG tree: Draxul::PluginSupport::NanoVG in bundled builds, the
+# staged support/nanovg copy in standalone extractions. That tree owns the
+# upstream pin.
 
 FetchContent_Declare(imgui
     GIT_REPOSITORY https://github.com/ocornut/imgui.git
