@@ -26,8 +26,8 @@ tests to use the lighter core test target.
 - [ ] Move NanoVG replay to `analysis_overlay_draw.cpp` and a host-private draw header.
 - [ ] Update `ScoreHost`/`ScorePresentation` includes and target source lists.
 - [ ] Move `scoreview_overlay_tests.cpp` from host test sources to core ScoreView test sources.
-- [ ] Do not reopen or redesign completed ScoreView controllers from
-  `kanban/done/21 scoreview-host-decomposition -refactor.md`.
+- [ ] Do not reopen or redesign the completed ScoreView controllers retained in
+  repository history.
 
 ## Unit tests
 
@@ -58,6 +58,6 @@ tests to use the lighter core test target.
 
 ## Dependencies and ownership
 
-Depends on `kanban/pending/00 internal-target-build-policy -refactor.md`. One
-ScoreView owner performs the declaration/source split. Core test migration and a
+Depends on the core repository's internal-target build-policy work. One ScoreView
+owner performs the declaration/source split. Core test migration and a
 host draw smoke can proceed independently after declarations settle.

@@ -10,7 +10,7 @@
 
 ## Implementation plan
 
-- [ ] Extract or reuse a small atomic-file storage adapter with injected filesystem operations; align semantics with pending 02 session persistence rather than inventing a second policy.
+- [ ] Extract or reuse a small atomic-file storage adapter with injected filesystem operations; align semantics with the core atomic-session persistence policy rather than inventing a second one.
 - [ ] Define the durability contract explicitly: temporary file in the same directory, complete write, flush/close, optional file sync, atomic replace, optional directory sync, and cleanup.
 - [ ] Preserve the previous destination until replacement succeeds; use correct Windows replace semantics instead of relying on unspecified overwrite behavior.
 - [ ] Surface load corruption and save failures to ScoreHost through a warning/toast seam while falling back to a fresh in-memory model.
@@ -26,6 +26,6 @@
 
 ## Dependencies and parallelism
 
-Coordinate with pending 02 to share one atomic storage contract. This can be a filesystem/test-focused task independent of `score_host.cpp` until error reporting is connected. Blocks relying on progress history for items 64 and 68.
+Coordinate with the core atomic-session persistence work to share one storage contract. This can be a filesystem/test-focused task independent of `score_host.cpp` until error reporting is connected. Blocks `kanban/ice-box/64 scoreview-piece-library -feature.md` and `kanban/ice-box/68 scoreview-session-recap -feature.md`.
 
 <model>GPT-5 Codex</model>

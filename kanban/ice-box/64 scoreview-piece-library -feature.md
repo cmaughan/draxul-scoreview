@@ -27,6 +27,6 @@ When ScoreView launches without a source, show recent pieces with useful progres
 
 ## Dependencies and parallelism
 
-Depends on progress crash-safety item 17, hostile MXL item 18, and preferably ScoreSessionController from item 21. A model/storage agent can work independently from presentation after the index schema is agreed.
+Depends on `kanban/ice-box/17 scoreview-progress-crash-safety -test.md`, `kanban/ice-box/18 hostile-mxl-inputs -test.md`, and preferably the planned `ScoreSessionController` seam. A model/storage agent can work independently from presentation after the index schema is agreed.
 
 <model>GPT-5 Codex</model>

@@ -26,6 +26,6 @@ Show a concise end-of-practice summary: bars promoted, tempo movement, accuracy/
 
 ## Dependencies and parallelism
 
-Depends on item 17 and preferably `ScoreSessionController`/view model from item 21. Statistics and presentation can be separate tasks once the recap record is frozen.
+Depends on `kanban/ice-box/17 scoreview-progress-crash-safety -test.md` and preferably the planned `ScoreSessionController`/view-model seam. Statistics and presentation can be separate tasks once the recap record is frozen.
 
 <model>GPT-5 Codex</model>

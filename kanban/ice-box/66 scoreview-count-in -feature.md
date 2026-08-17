@@ -26,6 +26,6 @@ Play one or two bars of metronome before Roll transport begins so the player can
 
 ## Dependencies and parallelism
 
-Best after item 21's Stream/Audio controller seams. Independent of practice loop, though both must define rewind behavior consistently.
+Best after the planned Stream/Audio controller seams. Independent of practice loop, though both must define rewind behavior consistently.
 
 <model>GPT-5 Codex</model>

@@ -27,6 +27,6 @@ Select a bar range and loop it deliberately in Roll mode instead of relying only
 
 ## Dependencies and parallelism
 
-Depends on item 19 and preferably ScoreStreamController from item 21. It can proceed independently of audio features after the stream API is stable.
+Depends on `kanban/ice-box/19 source-slicer-corpus-equivalence -test.md` and preferably the planned `ScoreStreamController` seam. It can proceed independently of audio features after the stream API is stable.
 
 <model>GPT-5 Codex</model>

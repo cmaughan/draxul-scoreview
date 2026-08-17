@@ -26,6 +26,6 @@ Manually isolate left hand, right hand, or both in Roll mode for deliberate prac
 
 ## Dependencies and parallelism
 
-Depends on item 19 and preferably item 21's stream boundary. Coordinate with practice loops because both transform source windows; each policy should compose through one request model.
+Depends on `kanban/ice-box/19 source-slicer-corpus-equivalence -test.md` and preferably the planned stream-controller boundary. Coordinate with practice loops because both transform source windows; each policy should compose through one request model.
 
 <model>GPT-5 Codex</model>

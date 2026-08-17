@@ -10,7 +10,7 @@ If the selected MIDI keyboard is unplugged, report it and reconnect automaticall
 
 ## Implementation plan
 
-- [ ] Move MIDI input ownership into `ScoreAudioController`/a dedicated `MidiDeviceSession` using the injected RtMidi adapter from item 16.
+- [ ] Move MIDI input ownership into `ScoreAudioController`/a dedicated `MidiDeviceSession` using the injected RtMidi adapter from `kanban/ice-box/16 scoreview-worker-device-stress -test.md`.
 - [ ] Represent preference by stable backend identifier where available, with normalized name/index as a documented fallback.
 - [ ] Poll or consume backend device-change notifications at a bounded cadence off the main thread, then publish small main-thread events.
 - [ ] On disconnect, cancel callbacks before closing, release held notes, fall back to keyboard input, preserve transport/progress, and show one actionable toast/status state.
@@ -27,6 +27,6 @@ If the selected MIDI keyboard is unplugged, report it and reconnect automaticall
 
 ## Dependencies and parallelism
 
-Depends on stress item 16, item 21 audio ownership, and preferably output-device item 70's device-session conventions. A MIDI specialist can own it after the controller API is stable.
+Depends on `kanban/ice-box/16 scoreview-worker-device-stress -test.md`, the planned audio-controller ownership seam, and preferably `kanban/ice-box/70 scoreview-audio-output-device -feature.md` for device-session conventions. A MIDI specialist can own it after the controller API is stable.
 
 <model>GPT-5 Codex</model>

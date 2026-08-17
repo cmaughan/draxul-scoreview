@@ -54,7 +54,7 @@ ScoreView has several independent background/device edges—engraving, microphon
 
 ## Dependencies and parallelism
 
-Depends on bugs 00/14 and preferably item 15's fixture. It should complete before item 21 or be used as that refactor's gate. One test owner can work mostly outside `score_host.cpp` once the injected contracts are stable.
+Depends on resolving the existing ScoreView lifecycle defects and preferably reusing the established deterministic fixture. It should complete before the controller-ownership refactor or be used as that refactor's gate. One test owner can work mostly outside `score_host.cpp` once the injected contracts are stable.
 
 <model>GPT-5 Codex</model>
 

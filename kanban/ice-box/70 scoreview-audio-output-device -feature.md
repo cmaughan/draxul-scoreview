@@ -26,6 +26,6 @@ Choose where ScoreView sends metronome, audition, and instrument audio, and reco
 
 ## Dependencies and parallelism
 
-Depends on bugs 00/14, stress item 16, and preferably ScoreAudioController from item 21. Establish this shared output ownership before layering MIDI reconnect behavior around devices.
+Depends on resolving the existing playback/lifecycle defects and on `kanban/ice-box/16 scoreview-worker-device-stress -test.md`; it should use the planned `ScoreAudioController` seam. Establish this shared output ownership before layering MIDI reconnect behavior around devices.
 
 <model>GPT-5 Codex</model>
