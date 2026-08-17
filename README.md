@@ -1,16 +1,32 @@
 # ScoreView
 
-ScoreView is a native product plugin for [Draxul](https://github.com/cmaughan/Draxul),
-a cross-platform GPU terminal / agentic shell host. It renders MusicXML piano scores
-with an embedded, pinned Verovio 6.2.1 engraving engine, drives them with a transport
-clock, judges live playing from a MIDI keyboard, the microphone, or a dev keyboard,
-and adapts the practice program to the player. It is mounted into the Draxul build as
-a git submodule at `plugins/scoreview` and loaded at runtime as a dynamic module
-(`dev.draxul.scoreview`) over Draxul's versioned C plugin ABI, rendering through its
-own private NanoVG backend (Vulkan on Windows, Metal on macOS). The end goal, set out
-in [plans/scoreview-manifesto.md](plans/scoreview-manifesto.md), is an adaptive
+ScoreView is an experimental music teacher. It dynamically analyses the music a
+student is learning, tracks the sections and musical patterns they are struggling
+with, and includes an adaptive composer that tries to create targeted music and
+exercises to help them improve those specific weaknesses.
+
+It is a native product plugin for [Draxul](https://github.com/cmaughan/Draxul), a
+cross-platform GPU terminal / agentic shell host. ScoreView renders MusicXML piano
+scores with an embedded, pinned Verovio 6.2.1 engraving engine, drives them with a
+transport clock, judges live playing from a MIDI keyboard, the microphone, or a dev
+keyboard, and adapts the practice program to the player. The end goal, set out in
+[plans/scoreview-manifesto.md](plans/scoreview-manifesto.md), is an adaptive
 piano-learning experience — an "endless runner" practice stream that teaches the
 piece you chose without ever feeling like practice.
+
+![Grieg's Waltz Op. 12, No. 2 rendered in ScoreView](screenshots/score.png)
+
+*ScoreView's reading view renders MusicXML as crisp, dynamically annotated notation.*
+
+![ScoreView adaptive player and learning inspector](screenshots/player.png)
+
+*The adaptive player combines a piano-roll guide with live performance analysis,
+trouble spots, and the composer's evolving practice program.*
+
+ScoreView is mounted into the Draxul build as a git submodule at
+`plugins/scoreview` and loaded at runtime as a dynamic module
+(`dev.draxul.scoreview`) over Draxul's versioned C plugin ABI, rendering through its
+own private NanoVG backend (Vulkan on Windows, Metal on macOS).
 
 Launch it into a Draxul tab or pane:
 
