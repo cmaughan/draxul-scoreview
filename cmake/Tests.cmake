@@ -66,7 +66,11 @@ set(_scoreview_extraction_command
     --config $<CONFIG>
     --generator ${CMAKE_GENERATOR}
     --platform=${CMAKE_GENERATOR_PLATFORM}
-    --toolset=${CMAKE_GENERATOR_TOOLSET})
+    --toolset=${CMAKE_GENERATOR_TOOLSET}
+    --c-compiler=${CMAKE_C_COMPILER}
+    --cxx-compiler=${CMAKE_CXX_COMPILER}
+    --make-program=${CMAKE_MAKE_PROGRAM}
+    --toolchain-file=${CMAKE_TOOLCHAIN_FILE})
 if(DRAXUL_ENABLE_RENDER_TESTS)
     list(APPEND _scoreview_extraction_command --render)
 endif()
