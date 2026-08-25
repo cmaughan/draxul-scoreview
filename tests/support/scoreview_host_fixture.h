@@ -189,6 +189,36 @@ public:
         intents.show_note_colors = on;
         host.apply_inspector_intents(intents);
     }
+
+    static bool slicer_ready(const ScoreHost& host)
+    {
+        return host.stream_->slicer().ready();
+    }
+
+    static void toggle_flow_mode(ScoreHost& host)
+    {
+        host.toggle_flow_mode();
+    }
+
+    static void relayout_flow(ScoreHost& host)
+    {
+        host.relayout_flow();
+    }
+
+    static FlowController::TransportMode transport_mode(const ScoreHost& host)
+    {
+        return host.flow_.mode();
+    }
+
+    static bool stream_active(const ScoreHost& host)
+    {
+        return host.stream_active();
+    }
+
+    static size_t waterfall_note_count(const ScoreHost& host)
+    {
+        return host.waterfall_notes_.size();
+    }
 };
 
 inline std::string read_verovio_svg_fixture()

@@ -1,0 +1,30 @@
+{
+  "finished_at": "2026-08-25T07:49:47.353466+00:00",
+  "inputs": [
+    "D:\\dev\\Draxul\\plugins\\scoreview\\plans\\reviews\\runs\\20260822T162121Z-paged-roll-transition-2c9e8410\\reports\\anthropic.claude.opus.md",
+    "D:\\dev\\Draxul\\plugins\\scoreview\\plans\\reviews\\runs\\20260822T162121Z-paged-roll-transition-2c9e8410\\reports\\openai.codex.gpt-5-6-sol.md"
+  ],
+  "kind": "summary",
+  "missing_reviewers": [],
+  "name": "paged-roll-kanban",
+  "prompt": "D:\\dev\\Draxul\\plugins\\scoreview\\.codex-kanban-prompt.md",
+  "run_id": "20260825T074613Z-paged-roll-kanban-summary-395f10dd",
+  "schema_version": 1,
+  "started_at": "2026-08-25T07:46:13.234258+00:00",
+  "status": "complete",
+  "summarizer": {
+    "company": "openai",
+    "duration_seconds": 213.907,
+    "error": "",
+    "fallback_reason": "",
+    "model": "gpt-5.6-sol",
+    "preflight": "passed",
+    "preflight_message": "live response verified",
+    "requested": "codex",
+    "sandbox_fallback": "",
+    "status": "passed",
+    "transport": "codex",
+    "version": "codex-cli 0.146.1"
+  },
+  "work_items": []
+}

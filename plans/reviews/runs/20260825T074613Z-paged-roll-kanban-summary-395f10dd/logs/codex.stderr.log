@@ -1,0 +1,1641 @@
+2026-08-25T07:46:17.523372Z ERROR codex_models_manager::cache: failed to load models cache: missing field `base_instructions` at line 98 column 5
+2026-08-25T07:46:18.102576Z  WARN codex_core::shell_snapshot: Failed to create shell snapshot for powershell: Shell snapshot not supported yet for PowerShell
+OpenAI Codex v0.146.1
+--------
+workdir: C:\Users\cmaughan\AppData\Local\Temp\draxul-review-codex-_42h86sl\workspace
+model: gpt-5.6-sol
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: xhigh
+reasoning summaries: none
+session id: 01a037e2-6166-7da2-8cbb-c239685a3b23
+--------
+user
+Read SYNTHESIS_PROMPT.md and follow it exactly. Read INPUT_REVIEWS/index.md and every listed review before responding. If SYNTHESIS_PROMPT.md requests Kanban work items, include each complete card in the final response under an exact level-three heading of the form `### kanban/pending/<filename>.md`; the trusted parent process will validate and create those files. Do not claim that you created them. This is a review-only task in a disposable repository snapshot. Inspect files but do not edit, create, delete, format, build, install, or run project binaries. Return the complete result as minimal Markdown in your final response. Do not write the report to a file.
+2026-08-25T07:46:36.140665Z  WARN codex_exec_server::client::http_client::route_aware_http_client: http/request send failed http_method="POST" error_is_timeout=false error_is_connect=false error=error sending request
+2026-08-25T07:46:36.140771Z  WARN codex_rmcp_client::http_client_adapter: streamable HTTP post_message failed endpoint_scheme="https" endpoint_host="maas.prd.astra.nvidia.com" endpoint_path="/maas/p4/mcp" endpoint_has_query=false mcp_method="initialize" mcp_request_id="0" has_session_id=false has_authorization_header=true
+2026-08-25T07:46:36.140918Z ERROR rmcp::transport::worker: worker quit with fatal: Transport channel closed, when Client(HttpRequest(HttpRequest("http/request failed: error sending request for url (https://maas.prd.astra.nvidia.com/maas/p4/mcp)")))
+2026-08-25T07:46:36.141064Z  WARN codex_rmcp_client::rmcp_client::streamable_http_retry: streamable HTTP MCP initialize failed with a retryable error; retrying attempt=1 max_attempts=3 delay_ms=250 error=handshaking with MCP server failed: Send message error Transport [rmcp::transport::worker::WorkerTransport<rmcp::transport::streamable_http_client::StreamableHttpClientWorker<rmcp::transport::auth::AuthClient<codex_rmcp_client::http_client_adapter::StreamableHttpClientAdapter>>>] error: Client error: HTTP request failed: http/request failed: error sending request for url (https://maas.prd.astra.nvidia.com/maas/p4/mcp), when send initialize request
+codex
+I’ll read the synthesis instructions, the review index, and every referenced review, then return only the requested consolidated Markdown. I’ll keep the repository untouched.
+exec
+"C:\\Users\\cmaughan\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\native\\powershell\\pwsh.exe" -Command "Get-Content -Raw -LiteralPath 'SYNTHESIS_PROMPT.md'; \""'`n<<<INDEX>>>`n"; Get-Content -Raw -LiteralPath '"'INPUT_REVIEWS/index.md'" in C:\Users\cmaughan\AppData\Local\Temp\draxul-review-codex-_42h86sl\workspace
+ succeeded in 6000ms:
+Please add cards for the consensus report, then commit and push everything
+
+
+<<<INDEX>>>
+
+# Input reviews
+
+- `01-anthropic-claude-opus.md` — source `anthropic.claude.opus.md` — sha256 `760575f5d808e2cd2efacdb7ac65516596a6c13e90ae15198e1592726c8a9383`
+- `02-openai-codex-gpt-5-6-sol.md` — source `openai.codex.gpt-5-6-sol.md` — sha256 `031a0fbb6d920367aa0dc78a3d805c738f296b8b05e8dd77ec5620feebe4cdd7`
+
+
+2026-08-25T07:47:08.129289Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 98 column 5
+exec
+"C:\\Users\\cmaughan\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\native\\powershell\\pwsh.exe" -Command "Get-Content -Raw -LiteralPath 'INPUT_REVIEWS/01-anthropic-claude-opus.md'; \""'`n<<<REVIEW_BREAK>>>`n"; Get-Content -Raw -LiteralPath '"'INPUT_REVIEWS/02-openai-codex-gpt-5-6-sol.md'" in C:\Users\cmaughan\AppData\Local\Temp\draxul-review-codex-_42h86sl\workspace
+ succeeded in 2957ms:
+I read `REVIEW_PROMPT.md` (one line: *"Review the code and tell me what else needs fixing"*), then reviewed the uncommitted change in `REPO_STATE.md` and the code around it. No files were modified.
+
+# Review — `codex/fix-scoreview-paged-roll`
+
+## The change itself
+
+The diff is correct and minimal. `toggle_flow_mode` used to gate `start_in_gate_` on `stream_->windowed() && stream_->slicer().ready()`, but the slicer is only primed inside `relayout_flow` (`score_runtime.cpp:674`), which runs *after* the toggle — so a `paged`-launched score could never enter the runner on the first `f`. Dropping the pre-check and letting `relayout_flow` → `enter_gate_mode` (`score_runtime.cpp:1268`) make the windowed-vs-monolith decision is the right seam. The new test exercises exactly that ordering.
+
+What follows is what still needs fixing, ranked.
+
+---
+
+## 1. A failed synchronous window build strands the window document in the main engine
+
+`product/draxul-scoreview/src/score_runtime.cpp:842`
+
+`engrave_window` loads the window XML into the engine *before* it can fail (`engraved_window.cpp:106`). When it fails at interpret/timemap/transport, `rebuild_window` sets `windowed_ = false` and `flow_dirty_ = true` — but never restores `source_bytes_`. Both recovery paths only reload the source when `stream_->active()` is true (`score_runtime.cpp:527`, `:625`), and `active_` is set only by a *successful* install (`note_installed`).
+
+Failure scenario: first entry into the runner (launch, or now every `f` from the paged view — `initial_window_installed_` false ⇒ synchronous path). The window loads, the transport join fails. The "monolithic fallback" then engraves the **19-bar window** as the whole piece: `quarters_per_bar_`, `piece_marking_qpm_`, the piece analysis and `set_piece(...)` are all derived from the slice, and pressing `f` paginates the same slice as the reading view. Silent wrong content, no error surfaced.
+
+Fix: reload `source_bytes_` in that failure branch (or track "engine holds a window document" separately from "install succeeded" — the two are conflated in `active_`). Note the async failure path (`:1084`) is fine, because the worker owns its own engine.
+
+## 2. Leaving the runner for the paged view never ends the Roll session
+
+`product/draxul-scoreview/src/score_runtime.cpp:1127`
+
+```cpp
+if (flow_.mode() == FlowController::TransportMode::Gate)
+    exit_gate_mode();
+```
+
+Roll — the *default* game mode — is not covered, so `f` out of the runner leaves the session live: the mic/MIDI lease stays held (`release_input_device` never runs, OS recording indicator stays on), `end_progress_session` is never called so the practice clock keeps accruing while the user reads the sheet, and `flow_.mode()` stays `Roll` behind a paged view. Escape does the right thing for both modes (`handle_gate_key:1320` → `exit_gate_mode` for any non-Clock mode), so this is an inconsistency, not a deliberate policy.
+
+It also matters more after this change: the return leg now re-arms Roll unconditionally, so the leaving leg should tear down unconditionally. Suggest `if (flow_.mode() != FlowController::TransportMode::Clock) exit_gate_mode();`.
+
+## 3. `windowed_` is a one-way latch for the life of the process
+
+`set_windowed(false)` is called from five places (`:220`, `:679`, `:816`, `:846`, `:1086`); nothing ever sets it back to true. One transient engrave failure permanently demotes the session to the monolithic strip — no restart, view toggle, or reload recovers the rolling window.
+
+The converse also leaks: `clear_piece_progress` → `restart_stream` → `rebuild_window` (`:973`, `:807`) doesn't consult `windowed()`, so "Clear progress" on a `mono` launch (or after a fallback) silently re-installs a rolling window, leaving `active() == true` with `windowed() == false`. Either honour the latch there or give the fallback an explicit re-arm point.
+
+## 4. `Gate` game mode can no longer be re-entered after a paged round-trip
+
+`product/draxul-scoreview/src/score_runtime.cpp:1122`
+
+The re-arm is `if (game_mode_ == Roll)`. Launched with the `gate` dev token: `f` → paged calls `exit_gate_mode()` (mode → Clock), `f` back leaves `start_in_gate_` false ⇒ the clock conveyor. The only way back is `g`, which forces `game_mode_ = Roll` (`:1943`). The gate verification instrument is unreachable for the rest of the run. Re-arm whatever `game_mode_` records rather than hard-coding Roll.
+
+## 5. `start_in_gate_` can latch true and fire later
+
+It is cleared only inside the `if (transport_ok)` block (`:736`). If `relayout_flow` returns early on `InterpretFailed` (`:645`, which forces the view back to Paged) or the transport join fails, the flag stays set; likewise if the user toggles back to Paged before the next pump (the Paged branch clears neither `start_in_gate_` nor `flow_dirty_`). A later, unrelated flow build then drops into the runner. Clear both in the Paged branch of `toggle_flow_mode`.
+
+## 6. Every flow build re-runs the whole-piece analysis and rewrites `.analysis.json`
+
+`score_runtime.cpp:731` calls `analyze_piece(...)` → `set_piece_profile`, which serializes and writes the dump to disk (`score_session_controller.cpp:65-73`) — unconditionally, on every `relayout_flow`. The analysis is a pure function of the timemap plus notated key, so it is identical every time. The paged path already guards against redoing it (`score_runtime.cpp:490`); the flow path doesn't.
+
+`relayout_flow` runs on every `f` into Flow, every `exit_gate_mode`, and every monolith fallback — and after this change the paged→flow path is a *whole-piece* Verovio engrave plus a full re-analysis plus a file write, immediately thrown away by `enter_gate_mode`'s `rebuild_window(0, …)`. Reuse the cached profile when one already exists for the piece.
+
+## 7. `SourceSlicer::window_xml_for` indexes every part with the first part's bar index
+
+`product/draxul-score-learn/src/source_slicer.cpp:286` and `:310`
+
+Validation is `bar.source_bar >= bar_count()` (`:256`), and `bar_count()` is the *first* part's measure count (`:79`). The emit loop then does `part.measures[item.source_bar]` and `part.state_before[state_index]` for every part. A score whose later parts have fewer measures — malformed or truncated MusicXML — is an out-of-bounds `vector::operator[]`, i.e. UB, not a rejection. Multi-part sources do reach this path: they only disable the *composer* (`stream_composer.h:88` requires `part_count() == 1`), not windowing. Bound the check by `std::min` over all parts, or skip parts that are short. (This is the class of gap ice-box card 18 "hostile-mxl-inputs" is holding.)
+
+## 8. Test coverage gaps around the change
+
+- The new test covers Paged → Roll, but nothing covers the reverse leg — `toggle_flow_mode` is used in exactly one test, and finding 2 would be caught by asserting `transport_mode == Clock` / input released after `f` out of the runner.
+- The behaviour the change newly enables for non-sliceable sources (`.mxl`, `mono`) — Roll on the whole-piece strip via `enter_gate_mode`'s else branch — is untested.
+- `"a layout failure degrades to the monolithic fallback"` (`tests/scoreview_host_orchestration_tests.cpp:209`) only exercises `load()`-fails and then asserts shutdown safety; it never asserts what the fallback actually renders, which is why finding 1 is invisible today. A `DeterministicLayoutEngine` that loads successfully but yields no timemap would cover it.
+
+---
+
+Findings 1 and 2 are the ones I'd fix before merging; 1 is a silent-wrong-content bug on a path this change makes more reachable, and 2 is a device/privacy leak with a one-line fix in the function already being edited.
+
+
+<<<REVIEW_BREAK>>>
+
+## Findings
+
+- **P1 — Roll is not torn down when returning to paged view.** [score_runtime.cpp:1127](/C:/Users/cmaughan/AppData/Local/Temp/draxul-review-codex-16rmj5g4/workspace/product/draxul-scoreview/src/score_runtime.cpp:1127) only exits `Gate`, not `Roll`. Consequently, switching back from the newly enabled paged→Roll path leaves the progress session and microphone/MIDI lease active, potentially blocking other panes and counting reading time as practice. Roll needs the same session/input teardown.
+
+- **P2 — Explicit `flow` mode can become Roll after a view round-trip.** [score_runtime.cpp:1122](/C:/Users/cmaughan/AppData/Local/Temp/draxul-review-codex-16rmj5g4/workspace/product/draxul-scoreview/src/score_runtime.cpp:1122) treats `game_mode_ == Roll` as proof the user was in the runner, but initialization leaves `game_mode_` as Roll even for `flow`/`flow-autoplay`. Thus flow→paged→flow can unexpectedly auto-start Roll, newly affecting `.mxl` and one-bar sources after removal of the window checks. Track the previous transport mode or set `game_mode_` to `Clock` for explicit flow mode.
+
+Tests were not run, per the review-only constraint.
+
+
+2026-08-25T07:47:15.221501Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 98 column 5
+codex
+Both reviews agree on the Roll teardown defect. They also overlap on mode restoration, but describe distinct affected launch modes, so I’m checking the repository’s existing Kanban card format before drafting the complete consensus cards.
+exec
+"C:\\Users\\cmaughan\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\native\\powershell\\pwsh.exe" -Command "rg --files -g 'kanban/**' -g '*.md' | Sort-Object" in C:\Users\cmaughan\AppData\Local\Temp\draxul-review-codex-_42h86sl\workspace
+ succeeded in 3191ms:
+.codex-kanban-prompt.md
+docs\scoreview.md
+INPUT_REVIEWS\01-anthropic-claude-opus.md
+INPUT_REVIEWS\02-openai-codex-gpt-5-6-sol.md
+INPUT_REVIEWS\index.md
+kanban\ice-box\16 scoreview-worker-device-stress -test.md
+kanban\ice-box\17 scoreview-progress-crash-safety -test.md
+kanban\ice-box\18 hostile-mxl-inputs -test.md
+kanban\ice-box\19 source-slicer-corpus-equivalence -test.md
+kanban\ice-box\64 scoreview-piece-library -feature.md
+kanban\ice-box\65 scoreview-practice-loop -feature.md
+kanban\ice-box\66 scoreview-count-in -feature.md
+kanban\ice-box\67 scoreview-hand-practice -feature.md
+kanban\ice-box\68 scoreview-session-recap -feature.md
+kanban\ice-box\70 scoreview-audio-output-device -feature.md
+kanban\ice-box\71 scoreview-midi-auto-reconnect -feature.md
+kanban\pending\07 scoreview-analysis-overlay-boundary -refactor.md
+kanban\pending\18 scoreview-keyboard-layout-boundary -refactor.md
+plans\scoreview-composer.md
+plans\scoreview-composition-model.md
+plans\scoreview-conveyor.md
+plans\scoreview-ear.md
+plans\scoreview-gate.md
+plans\scoreview-learning-research.md
+plans\scoreview-manifesto.md
+plans\scoreview-runner.md
+plans\scoreview-stream.md
+plans\scoreview.md
+README.md
+REPO_STATE.md
+SYNTHESIS_PROMPT.md
+tests\fixtures\audio\README.md
+
+2026-08-25T07:47:24.187003Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 98 column 5
+exec
+"C:\\Users\\cmaughan\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\native\\powershell\\pwsh.exe" -Command "Get-Content -Raw -LiteralPath '.codex-kanban-prompt.md'; \""'`n<<<CARD_BREAK>>>`n"; Get-Content -Raw -LiteralPath '"'kanban/pending/07 scoreview-analysis-overlay-boundary -refactor.md'; \""'`n<<<CARD_BREAK>>>`n"; Get-Content -Raw -LiteralPath '"'kanban/pending/18 scoreview-keyboard-layout-boundary -refactor.md'; \""'`n<<<STATE>>>`n"; Get-Content -Raw -LiteralPath '"'REPO_STATE.md'" in C:\Users\cmaughan\AppData\Local\Temp\draxul-review-codex-_42h86sl\workspace
+ succeeded in 2298ms:
+Please add cards for the consensus report, then commit and push everything
+
+
+<<<CARD_BREAK>>>
+
+# Split ScoreView analysis-overlay build from NanoVG drawing
+
+**Type:** refactor
+**Priority:** P2 / sequence 07
+**Raised by:** Claude
+**Consensus:** `plans/reviews/review-refactor-consensus.md`, Accepted 8
+
+## Goal
+
+Compile pure analysis-overlay geometry construction into `draxul-scoreview` and
+keep NanoVG replay private to `draxul-scoreview-host`, allowing overlay geometry
+tests to use the lighter core test target.
+
+## Boundary verification
+
+- [ ] Verify `analysis_overlay.cpp` construction and draw regions have no hidden shared mutable state.
+- [ ] Inventory all declarations/callers in `analysis_overlay.h`, `ScoreHost`, and `ScorePresentation`.
+- [ ] Confirm core construction requires only draw-list, timemap, highlight, and learning profile values.
+- [ ] Confirm drawing alone needs `NVGcontext` and `ScoreTextFonts`.
+- [ ] Record current overlay test cases and host-level replay coverage before moving them.
+
+## Implementation and migration
+
+- [ ] Keep `AnalysisOverlay` values and `build_analysis_overlay` in the public core header.
+- [ ] Move construction to `analysis_overlay_build.cpp` in `draxul-scoreview`.
+- [ ] Move NanoVG replay to `analysis_overlay_draw.cpp` and a host-private draw header.
+- [ ] Update `ScoreHost`/`ScorePresentation` includes and target source lists.
+- [ ] Move `scoreview_overlay_tests.cpp` from host test sources to core ScoreView test sources.
+- [ ] Do not reopen or redesign the completed ScoreView controllers retained in
+  repository history.
+
+## Unit tests
+
+- [ ] Run every existing overlay geometry assertion through `draxul-test-scoreview`.
+- [ ] Add/retain one host-level draw smoke case for NanoVG replay if current coverage exercises drawing.
+- [ ] Verify no core test links SDL, ImGui, NanoVG, host, or microphone code for overlay construction.
+- [ ] Build both `draxul-test-scoreview` and `draxul-test-scoreview-host`.
+- [ ] Run CTest labels `scoreview` and `scoreview-host`.
+
+## Cross-platform validation
+
+- [ ] Build and run focused tests on Windows and macOS.
+- [ ] Confirm NanoVG overlay output/ordering remains identical on both platforms.
+- [ ] Confirm no Vulkan/Metal API or resource type enters the pure build path.
+- [ ] Do not touch microphone/audio code; verify macOS TCC ordering remains unaffected.
+
+## Agent documentation and tooling
+
+- [ ] Update Score nested guidance/module map if it lists overlay ownership.
+- [ ] Ensure label tooling builds core-only overlay tests for `--label scoreview`.
+
+## Acceptance criteria
+
+- [ ] Pure overlay tests link to `draxul-scoreview`, not `draxul-scoreview-host`.
+- [ ] NanoVG replay remains host-private and behaviorally unchanged.
+- [ ] Public analysis value/build API remains source compatible.
+- [ ] Focused ScoreView core/host tests, full tests, and smoke pass.
+
+## Dependencies and ownership
+
+Depends on the core repository's internal-target build-policy work. One ScoreView
+owner performs the declaration/source split. Core test migration and a
+host draw smoke can proceed independently after declarations settle.
+
+
+<<<CARD_BREAK>>>
+
+# Separate ScoreView keyboard layout from NanoVG replay
+
+**Type:** refactor  
+**Priority:** P2  
+**Raised by:** Codex  
+**Depends on:** coordinate with pending `07`
+
+## Boundary verification
+
+- [ ] Inventory geometry, palette, presentation values, draw callers, and tests.
+- [ ] Confirm which overlay code requires palette APIs.
+- [ ] Record palette bytes and representative key positions.
+
+## Implementation and migration
+
+- [ ] Add public core `keyboard_layout.h`.
+- [ ] Move MIDI bounds, geometry, and palette APIs into it.
+- [ ] Move `KeyboardLit` and draw declarations to a host-private header.
+- [ ] Update core/host includes.
+- [ ] Remove `keyboard_render_nvg.h` without forwarding duplication.
+- [ ] Extract keyboard tests from the host-classified composer suite.
+
+## Unit tests
+
+- [ ] Add `scoreview_keyboard_layout_tests.cpp`.
+- [ ] Test 88-key bounds, black/white classification, centers, spelling, and palette selection.
+- [ ] Keep one host-level draw smoke if useful.
+- [ ] Build/run `draxul-test-scoreview` and `draxul-test-scoreview-host`.
+
+## Cross-platform validation
+
+- [ ] Verify NanoVG output and palette bytes on Windows and macOS.
+- [ ] Confirm core keyboard tests link no host/NanoVG/SDL/ImGui dependency.
+
+## Agent documentation/tooling
+
+- [ ] Update the Score nested guide/module map under pending `08`.
+
+## Acceptance criteria
+
+- [ ] Core publishes no `NVGcontext` keyboard API.
+- [ ] Geometry/palette tests use only `draxul-scoreview`.
+- [ ] Visual output is unchanged.
+- [ ] Score core/host tests pass.
+
+
+<<<STATE>>>
+
+# Repository state
+
+## Branch
+
+```text
+codex/fix-scoreview-paged-roll
+```
+
+## HEAD
+
+```text
+d91dcef793307b2d85736445a21d0e4b2d16eba8
+```
+
+## Status
+
+```text
+ M product/draxul-scoreview/src/score_runtime.cpp
+ M tests/scoreview_host_orchestration_tests.cpp
+ M tests/support/scoreview_host_fixture.h
+?? .codex-kanban-prompt.md
+?? plans/reviews/
+```
+
+## Unstaged diff
+
+```text
+diff --git a/product/draxul-scoreview/src/score_runtime.cpp b/product/draxul-scoreview/src/score_runtime.cpp
+index faf2adb..cac9973 100644
+--- a/product/draxul-scoreview/src/score_runtime.cpp
++++ b/product/draxul-scoreview/src/score_runtime.cpp
+@@ -1116,11 +1116,10 @@ void ScoreRuntime::toggle_flow_mode()
+     {
+         view_mode_ = ViewMode::Flow;
+         flow_dirty_ = true; // re-engrave as the strip on the next pump
+-        // Returning to the runner: if the piece supports the rolling Roll
+-        // window, re-arm it (the flow build re-enters it via start_in_gate_);
+-        // otherwise this falls through to the whole-piece conveyor.
+-        if (game_mode_ == FlowController::TransportMode::Roll && stream_->windowed()
+-            && stream_->slicer().ready())
++        // Returning to the runner: request Roll before the flow build primes
++        // the slicer. The build then installs a rolling window when supported
++        // or applies its existing whole-piece fallback.
++        if (game_mode_ == FlowController::TransportMode::Roll)
+             start_in_gate_ = true;
+     }
+     else
+diff --git a/tests/scoreview_host_orchestration_tests.cpp b/tests/scoreview_host_orchestration_tests.cpp
+index aeab70d..51c70e9 100644
+--- a/tests/scoreview_host_orchestration_tests.cpp
++++ b/tests/scoreview_host_orchestration_tests.cpp
+@@ -328,6 +328,38 @@ TEST_CASE("full-score note colors resolve after the paged timemap is available",
+     CHECK(ScoreHostTestAccess::paged_guided_glyph_count(host) > 0);
+ }
+ 
++TEST_CASE("switching a paged score enters the rolling play view before the slicer is primed",
++    "[scoreview][host][orchestration][view]")
++{
++    auto engine_state = std::make_shared<FakeEngineState>();
++    ScoreHost host;
++    const std::string svg = read_verovio_svg_fixture();
++    REQUIRE_FALSE(svg.empty());
++
++    std::string source(kScoreHostFixtureMinimalScore);
++    const size_t part_end = source.rfind("</part>");
++    REQUIRE(part_end != std::string::npos);
++    source.insert(part_end, R"xml(
++    <measure number="2">
++      <note><pitch><step>D</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note>
++    </measure>
++  )xml");
++
++    std::string error;
++    REQUIRE(ScoreHostTestAccess::prime_paged(host,
++        std::make_unique<DeterministicLayoutEngine>(engine_state, svg, false),
++        source, error));
++    REQUIRE_FALSE(ScoreHostTestAccess::slicer_ready(host));
++
++    ScoreHostTestAccess::toggle_flow_mode(host);
++    ScoreHostTestAccess::relayout_flow(host);
++
++    CHECK(ScoreHostTestAccess::transport_mode(host)
++        == draxul::scoreview::FlowController::TransportMode::Roll);
++    CHECK(ScoreHostTestAccess::stream_active(host));
++    CHECK(ScoreHostTestAccess::waterfall_note_count(host) > 0);
++}
++
+ TEST_CASE("score audio can prefer a staged piano lazily",
+     "[scoreview][host][orchestration][audio]")
+ {
+diff --git a/tests/support/scoreview_host_fixture.h b/tests/support/scoreview_host_fixture.h
+index fca724a..c71e2cc 100644
+--- a/tests/support/scoreview_host_fixture.h
++++ b/tests/support/scoreview_host_fixture.h
+@@ -189,6 +189,36 @@ public:
+         intents.show_note_colors = on;
+         host.apply_inspector_intents(intents);
+     }
++
++    static bool slicer_ready(const ScoreHost& host)
++    {
++        return host.stream_->slicer().ready();
++    }
++
++    static void toggle_flow_mode(ScoreHost& host)
++    {
++        host.toggle_flow_mode();
++    }
++
++    static void relayout_flow(ScoreHost& host)
++    {
++        host.relayout_flow();
++    }
++
++    static FlowController::TransportMode transport_mode(const ScoreHost& host)
++    {
++        return host.flow_.mode();
++    }
++
++    static bool stream_active(const ScoreHost& host)
++    {
++        return host.stream_active();
++    }
++
++    static size_t waterfall_note_count(const ScoreHost& host)
++    {
++        return host.waterfall_notes_.size();
++    }
+ };
+ 
+ inline std::string read_verovio_svg_fixture()
+```
+
+## Staged diff
+
+```text
+
+```
+
+
+2026-08-25T07:47:33.210610Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 98 column 5
+exec
+"C:\\Users\\cmaughan\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\native\\powershell\\pwsh.exe" -Command "Get-ChildItem -LiteralPath 'plans/reviews' -File -Force | Select-Object -ExpandProperty FullName; Get-ChildItem -LiteralPath 'kanban' -Directory -Force | Select-Object -ExpandProperty Name; Get-ChildItem -LiteralPath 'kanban/pending' -File -Force | Select-Object -ExpandProperty Name" in C:\Users\cmaughan\AppData\Local\Temp\draxul-review-codex-_42h86sl\workspace
+ succeeded in 4256ms:
+ice-box
+pending
+07 scoreview-analysis-overlay-boundary -refactor.md
+18 scoreview-keyboard-layout-boundary -refactor.md
+Get-ChildItem: 
+Line |
+   2 |  Get-ChildItem -LiteralPath 'plans/reviews' -File -Force | Select-Obje …
+     |  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     | Cannot find path 'C:\Users\cmaughan\AppData\Local\Temp\draxul-review-codex-_42h86sl\workspace\plans\reviews' because it does not exist.
+
+2026-08-25T07:47:51.346852Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 98 column 5
+exec
+"C:\\Users\\cmaughan\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\native\\powershell\\pwsh.exe" -Command 'rg -n -C 18 "void ScoreRuntime::toggle_flow_mode|void ScoreRuntime::exit_gate_mode|game_mode_|start_in_gate_" product/draxul-scoreview/src/score_runtime.cpp; rg -n -C 8 "toggle_flow_mode|transport_mode|release_input|progress_session|game_mode" tests/scoreview_host_orchestration_tests.cpp tests/support/scoreview_host_fixture.h product/draxul-scoreview/src/score_runtime.h' in C:\Users\cmaughan\AppData\Local\Temp\draxul-review-codex-_42h86sl\workspace
+2026-08-25T07:48:02.837786Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 6.6 seconds
+Output:
+170-        // Instrument voices: every .sf2 staged in the plugin bundle is offered
+171-        // in the inspector. Loading is lazy, so large soundfonts are parsed on
+172-        // first selection rather than at startup.
+173-        audio_->stage_soundfonts(paths.soundfonts);
+174-        audio_->prefer_piano(0);
+175-
+176-        // Player memory: the per-piece progress file, keyed by the source
+177-        // bytes so renames don't lose history (stream plan S0).
+178-        session_->attach_source(paths.progress, bytes);
+179-
+180-        // Default: the runner (plans/scoreview-runner.md) — the conveyor in
+181-        // Roll mode with the dev keyboard, transport rolling from the first
+182-        // note (mic via `roll-mic` or `i`). Commands override: `paged` =
+183-        // the reading view, `flow`/`flow-autoplay` = clock conveyor,
+184-        // `gate*` = the wait-mode dev instrument (incl. the verification
+185-        // bots), `roll-mic` = the runner listening to the piano.
+186-        view_mode_ = ViewMode::Flow;
+187-        flow_dirty_ = true;
+188:        start_in_gate_ = true;
+189-        gate_input_requested_ = GateInput::Keyboard;
+190:        game_mode_ = FlowController::TransportMode::Roll;
+191-        const std::string& command = mode;
+192-        if (command.find("paged") != std::string::npos)
+193-        {
+194-            view_mode_ = ViewMode::Paged;
+195-            flow_dirty_ = false;
+196:            start_in_gate_ = false;
+197-        }
+198-        else if (command.find("gate") != std::string::npos)
+199-        {
+200:            game_mode_ = FlowController::TransportMode::Gate;
+201-            if (command.find("bot") != std::string::npos)
+202-                gate_input_requested_ = GateInput::Bot;
+203-            else if (command.find("mic") != std::string::npos)
+204-                gate_input_requested_ = GateInput::Mic;
+205-            gate_bot_accuracy_ = command.find("err") != std::string::npos ? 0.7 : 1.0;
+206-        }
+207-        else if (command.find("roll") != std::string::npos)
+208-        {
+209-            if (command.find("mic") != std::string::npos)
+210-                gate_input_requested_ = GateInput::Mic;
+211-        }
+212-        else if (command.find("flow") != std::string::npos)
+213-        {
+214:            start_in_gate_ = false;
+215-            flow_autoplay_ = command.find("autoplay") != std::string::npos;
+216-        }
+217-        // `mono` disables the rolling window (the monolithic-strip
+218-        // verification instrument for window-equivalence checks).
+219-        if (command.find("mono") != std::string::npos)
+220-            stream_->set_windowed(false);
+221-        // The metronome defaults ON with subdivisions; `notick`/`tick`/
+222-        // `tick8` tokens override from launch (dev/test).
+223-        if (command.find("notick") != std::string::npos)
+224-            audio_->set_tick_level(ScoreAudioController::TickLevel::Off);
+225-        if (command.find("notes") != std::string::npos)
+226-            audio_->set_audition(true);
+227-        if (command.find("nowaterfall") != std::string::npos)
+228-            show_waterfall_ = false;
+229-        if (command.find("noverdict") != std::string::npos
+230-            || command.find("nomistake") != std::string::npos)
+231-            mark_mistakes_ = false;
+232-        if (command.find("fullcolor") != std::string::npos)
+--
+718-        }
+719-        std::optional<int> notated_fifths;
+720-        if (has_model_ && !model_.parts.empty())
+721-        {
+722-            for (const auto& measure : model_.parts[0].measures)
+723-            {
+724-                if (measure.key)
+725-                {
+726-                    notated_fifths = measure.key->fifths;
+727-                    break;
+728-                }
+729-            }
+730-        }
+731-        session_->set_piece_profile(
+732-            analyze_piece(analysis_onsets, quarters_per_bar_, notated_fifths));
+733-        // A fresh analysis invalidates any overlay built against the old
+734-        // profile (the paged view may already be holding pages).
+735-        rebuild_analysis_overlay();
+736:        if (start_in_gate_)
+737-        {
+738:            start_in_gate_ = false;
+739-            enter_gate_mode(
+740-                gate_input_requested_, kBotPaceQpm, gate_bot_accuracy_, midi_port_requested_);
+741-        }
+742-    }
+743-
+744-    if (flow_autoplay_ && transport_ok)
+745-    {
+746-        flow_.play();
+747-        flow_autoplay_ = false;
+748-    }
+749-    scroll_y_ = std::clamp(scroll_y_, 0.0f, max_scroll());
+750-    if (callbacks_ != nullptr)
+751-        callbacks_->request_frame();
+752-}
+753-
+754-EngraveParams ScoreRuntime::current_engrave_params() const
+755-{
+756-    EngraveParams params;
+--
+1092-    // exited the game), drop the now-stale result rather than forcing Roll back.
+1093-    if (view_mode_ != ViewMode::Flow || flow_.mode() != FlowController::TransportMode::Roll)
+1094-        return;
+1095-    // Install at the CURRENT playhead (the old window kept advancing while the
+1096-    // engrave ran); carry replays the transport/verdicts onto the fresh strip.
+1097-    const int first_bar = done.first_bar;
+1098-    const int count = done.count;
+1099-    const auto install_start = std::chrono::steady_clock::now();
+1100-    const double install_position_q = carry ? stream_position_q() : intent_position_q;
+1101-    install_window(std::move(done.window), first_bar, count, done.stream_offset_q,
+1102-        install_position_q, carry, preserve_tempo);
+1103-    const double install_ms = std::chrono::duration<double, std::milli>(
+1104-        std::chrono::steady_clock::now() - install_start)
+1105-                                  .count();
+1106-    DRAXUL_LOG_DEBUG(LogCategory::App, "score: window -> bars %d..%d (%.1f ms install, async)",
+1107-        first_bar, first_bar + count - 1, install_ms);
+1108-}
+1109-
+1110:void ScoreRuntime::toggle_flow_mode()
+1111-{
+1112-    if (!engine_ || !engine_->is_loaded())
+1113-        return;
+1114-    stream_->cancel_async();
+1115-    if (view_mode_ == ViewMode::Paged)
+1116-    {
+1117-        view_mode_ = ViewMode::Flow;
+1118-        flow_dirty_ = true; // re-engrave as the strip on the next pump
+1119-        // Returning to the runner: request Roll before the flow build primes
+1120-        // the slicer. The build then installs a rolling window when supported
+1121-        // or applies its existing whole-piece fallback.
+1122:        if (game_mode_ == FlowController::TransportMode::Roll)
+1123:            start_in_gate_ = true;
+1124-    }
+1125-    else
+1126-    {
+1127-        if (flow_.mode() == FlowController::TransportMode::Gate)
+1128-            exit_gate_mode();
+1129-        view_mode_ = ViewMode::Paged;
+1130-        flow_.pause();
+1131-        layout_dirty_ = true; // re-engrave pages; scroll_y_ carries over
+1132-    }
+1133-    if (callbacks_ != nullptr)
+1134-        callbacks_->request_frame();
+1135-}
+1136-
+1137-void ScoreRuntime::apply_lit_update()
+1138-{
+1139-    const FlowController::LitUpdate update = flow_.take_lit_update();
+1140-    if (update.reset)
+1141-        highlight_.clear_lit();
+--
+1250-
+1251-void ScoreRuntime::release_audio_output()
+1252-{
+1253-    audio_->shutdown();
+1254-    audio_lease_.reset();
+1255-}
+1256-
+1257-void ScoreRuntime::release_input_device()
+1258-{
+1259-    input_rig_.clear();
+1260-    input_lease_.reset();
+1261-}
+1262-
+1263-void ScoreRuntime::enter_gate_mode(
+1264-    GateInput input, double bot_pace_qpm, double bot_accuracy, int midi_port)
+1265-{
+1266-    if (!flow_.gates_ready())
+1267-        return;
+1268:    if (game_mode_ == FlowController::TransportMode::Roll && stream_->windowed() && stream_->slicer().ready())
+1269-    {
+1270-        // The runner plays on the rolling window from stream bar 0, with
+1271-        // a fresh program (mastery persists in the player model, not here).
+1272-        stream_->verdict_archive().clear();
+1273-        reset_stream_plan();
+1274-        if (!rebuild_window(0, 0.0, /*carry=*/false))
+1275:            flow_.set_mode(game_mode_); // fell back to the monolithic strip
+1276-        else if (stream_->async_in_flight())
+1277:            flow_.set_mode(game_mode_); // old strip stays interactive while replacing it
+1278-    }
+1279-    else
+1280-    {
+1281:        flow_.set_mode(game_mode_);
+1282-    }
+1283-    highlight_.clear_lit();
+1284-    apply_verdict_update(); // consume the reset
+1285-    set_gate_input(input, bot_pace_qpm, bot_accuracy, midi_port);
+1286-    // The gate transport starts immediately for every input: it just glides
+1287-    // to the first onset and WAITS there. Space pauses/resumes.
+1288-    flow_.play();
+1289:    if (game_mode_ == FlowController::TransportMode::Roll)
+1290-        begin_progress_session();
+1291-    last_logged_gate_ = 0;
+1292-    logged_gate_end_ = false;
+1293-    if (callbacks_ != nullptr)
+1294-        callbacks_->request_frame();
+1295-}
+1296-
+1297:void ScoreRuntime::exit_gate_mode()
+1298-{
+1299-    end_progress_session();
+1300-    stream_->cancel_async();
+1301-    release_input_device();
+1302-    flow_.set_mode(FlowController::TransportMode::Clock);
+1303-    if (stream_active())
+1304-    {
+1305-        // The engine holds a window document; the clock conveyor wants the
+1306-        // whole piece back (relayout_flow reloads the source).
+1307-        stream_->verdict_archive().clear();
+1308-        flow_dirty_ = true;
+1309-    }
+1310-    highlight_.clear_lit();
+1311-    apply_lit_update(); // consume the reset; re-light anything at q <= 0
+1312-    if (callbacks_ != nullptr)
+1313-        callbacks_->request_frame();
+1314-}
+1315-
+--
+1925-    }
+1926-    if (!event.pressed)
+1927-        return;
+1928-    if (event.keycode == SDLK_F)
+1929-    {
+1930-        toggle_flow_mode();
+1931-        return;
+1932-    }
+1933-    if (view_mode_ == ViewMode::Flow)
+1934-    {
+1935-        if (handle_gate_key(event.keycode))
+1936-        {
+1937-            if (callbacks_ != nullptr)
+1938-                callbacks_->request_frame();
+1939-            return;
+1940-        }
+1941-        if (event.keycode == SDLK_G && flow_.mode() == FlowController::TransportMode::Clock && flow_.gates_ready())
+1942-        {
+1943:            game_mode_ = FlowController::TransportMode::Roll; // `g` = the game
+1944-            enter_gate_mode(GateInput::Keyboard, 0.0, 1.0);
+1945-            return;
+1946-        }
+1947-        switch (event.keycode)
+1948-        {
+1949-        case SDLK_SPACE:
+1950-            if (flow_.playing())
+1951-                flow_.pause();
+1952-            else
+1953-                flow_.play();
+1954-            break;
+1955-        case SDLK_LEFTBRACKET:
+1956-            flow_.set_tempo_qpm(flow_.tempo_qpm() / 1.04);
+1957-            break;
+1958-        case SDLK_RIGHTBRACKET:
+1959-            flow_.set_tempo_qpm(flow_.tempo_qpm() * 1.04);
+1960-            break;
+1961-        case SDLK_R:
+tests/support/scoreview_host_fixture.h-190-        host.apply_inspector_intents(intents);
+tests/support/scoreview_host_fixture.h-191-    }
+tests/support/scoreview_host_fixture.h-192-
+tests/support/scoreview_host_fixture.h-193-    static bool slicer_ready(const ScoreHost& host)
+tests/support/scoreview_host_fixture.h-194-    {
+tests/support/scoreview_host_fixture.h-195-        return host.stream_->slicer().ready();
+tests/support/scoreview_host_fixture.h-196-    }
+tests/support/scoreview_host_fixture.h-197-
+tests/support/scoreview_host_fixture.h:198:    static void toggle_flow_mode(ScoreHost& host)
+tests/support/scoreview_host_fixture.h-199-    {
+tests/support/scoreview_host_fixture.h:200:        host.toggle_flow_mode();
+tests/support/scoreview_host_fixture.h-201-    }
+tests/support/scoreview_host_fixture.h-202-
+tests/support/scoreview_host_fixture.h-203-    static void relayout_flow(ScoreHost& host)
+tests/support/scoreview_host_fixture.h-204-    {
+tests/support/scoreview_host_fixture.h-205-        host.relayout_flow();
+tests/support/scoreview_host_fixture.h-206-    }
+tests/support/scoreview_host_fixture.h-207-
+tests/support/scoreview_host_fixture.h:208:    static FlowController::TransportMode transport_mode(const ScoreHost& host)
+tests/support/scoreview_host_fixture.h-209-    {
+tests/support/scoreview_host_fixture.h-210-        return host.flow_.mode();
+tests/support/scoreview_host_fixture.h-211-    }
+tests/support/scoreview_host_fixture.h-212-
+tests/support/scoreview_host_fixture.h-213-    static bool stream_active(const ScoreHost& host)
+tests/support/scoreview_host_fixture.h-214-    {
+tests/support/scoreview_host_fixture.h-215-        return host.stream_active();
+tests/support/scoreview_host_fixture.h-216-    }
+--
+tests/scoreview_host_orchestration_tests.cpp-346-  )xml");
+tests/scoreview_host_orchestration_tests.cpp-347-
+tests/scoreview_host_orchestration_tests.cpp-348-    std::string error;
+tests/scoreview_host_orchestration_tests.cpp-349-    REQUIRE(ScoreHostTestAccess::prime_paged(host,
+tests/scoreview_host_orchestration_tests.cpp-350-        std::make_unique<DeterministicLayoutEngine>(engine_state, svg, false),
+tests/scoreview_host_orchestration_tests.cpp-351-        source, error));
+tests/scoreview_host_orchestration_tests.cpp-352-    REQUIRE_FALSE(ScoreHostTestAccess::slicer_ready(host));
+tests/scoreview_host_orchestration_tests.cpp-353-
+tests/scoreview_host_orchestration_tests.cpp:354:    ScoreHostTestAccess::toggle_flow_mode(host);
+tests/scoreview_host_orchestration_tests.cpp-355-    ScoreHostTestAccess::relayout_flow(host);
+tests/scoreview_host_orchestration_tests.cpp-356-
+tests/scoreview_host_orchestration_tests.cpp:357:    CHECK(ScoreHostTestAccess::transport_mode(host)
+tests/scoreview_host_orchestration_tests.cpp-358-        == draxul::scoreview::FlowController::TransportMode::Roll);
+tests/scoreview_host_orchestration_tests.cpp-359-    CHECK(ScoreHostTestAccess::stream_active(host));
+tests/scoreview_host_orchestration_tests.cpp-360-    CHECK(ScoreHostTestAccess::waterfall_note_count(host) > 0);
+tests/scoreview_host_orchestration_tests.cpp-361-}
+tests/scoreview_host_orchestration_tests.cpp-362-
+tests/scoreview_host_orchestration_tests.cpp-363-TEST_CASE("score audio can prefer a staged piano lazily",
+tests/scoreview_host_orchestration_tests.cpp-364-    "[scoreview][host][orchestration][audio]")
+tests/scoreview_host_orchestration_tests.cpp-365-{
+product/draxul-scoreview/src/score_runtime.h: The system cannot find the file specified. (os error 2)
+
+ exited 1 in 6615ms:
+170-        // Instrument voices: every .sf2 staged in the plugin bundle is offered
+171-        // in the inspector. Loading is lazy, so large soundfonts are parsed on
+172-        // first selection rather than at startup.
+173-        audio_->stage_soundfonts(paths.soundfonts);
+174-        audio_->prefer_piano(0);
+175-
+176-        // Player memory: the per-piece progress file, keyed by the source
+177-        // bytes so renames don't lose history (stream plan S0).
+178-        session_->attach_source(paths.progress, bytes);
+179-
+180-        // Default: the runner (plans/scoreview-runner.md) — the conveyor in
+181-        // Roll mode with the dev keyboard, transport rolling from the first
+182-        // note (mic via `roll-mic` or `i`). Commands override: `paged` =
+183-        // the reading view, `flow`/`flow-autoplay` = clock conveyor,
+184-        // `gate*` = the wait-mode dev instrument (incl. the verification
+185-        // bots), `roll-mic` = the runner listening to the piano.
+186-        view_mode_ = ViewMode::Flow;
+187-        flow_dirty_ = true;
+188:        start_in_gate_ = true;
+189-        gate_input_requested_ = GateInput::Keyboard;
+190:        game_mode_ = FlowController::TransportMode::Roll;
+191-        const std::string& command = mode;
+192-        if (command.find("paged") != std::string::npos)
+193-        {
+194-            view_mode_ = ViewMode::Paged;
+195-            flow_dirty_ = false;
+196:            start_in_gate_ = false;
+197-        }
+198-        else if (command.find("gate") != std::string::npos)
+199-        {
+200:            game_mode_ = FlowController::TransportMode::Gate;
+201-            if (command.find("bot") != std::string::npos)
+202-                gate_input_requested_ = GateInput::Bot;
+203-            else if (command.find("mic") != std::string::npos)
+204-                gate_input_requested_ = GateInput::Mic;
+205-            gate_bot_accuracy_ = command.find("err") != std::string::npos ? 0.7 : 1.0;
+206-        }
+207-        else if (command.find("roll") != std::string::npos)
+208-        {
+209-            if (command.find("mic") != std::string::npos)
+210-                gate_input_requested_ = GateInput::Mic;
+211-        }
+212-        else if (command.find("flow") != std::string::npos)
+213-        {
+214:            start_in_gate_ = false;
+215-            flow_autoplay_ = command.find("autoplay") != std::string::npos;
+216-        }
+217-        // `mono` disables the rolling window (the monolithic-strip
+218-        // verification instrument for window-equivalence checks).
+219-        if (command.find("mono") != std::string::npos)
+220-            stream_->set_windowed(false);
+221-        // The metronome defaults ON with subdivisions; `notick`/`tick`/
+222-        // `tick8` tokens override from launch (dev/test).
+223-        if (command.find("notick") != std::string::npos)
+224-            audio_->set_tick_level(ScoreAudioController::TickLevel::Off);
+225-        if (command.find("notes") != std::string::npos)
+226-            audio_->set_audition(true);
+227-        if (command.find("nowaterfall") != std::string::npos)
+228-            show_waterfall_ = false;
+229-        if (command.find("noverdict") != std::string::npos
+230-            || command.find("nomistake") != std::string::npos)
+231-            mark_mistakes_ = false;
+232-        if (command.find("fullcolor") != std::string::npos)
+--
+718-        }
+719-        std::optional<int> notated_fifths;
+720-        if (has_model_ && !model_.parts.empty())
+721-        {
+722-            for (const auto& measure : model_.parts[0].measures)
+723-            {
+724-                if (measure.key)
+725-                {
+726-                    notated_fifths = measure.key->fifths;
+727-                    break;
+728-                }
+729-            }
+730-        }
+731-        session_->set_piece_profile(
+732-            analyze_piece(analysis_onsets, quarters_per_bar_, notated_fifths));
+733-        // A fresh analysis invalidates any overlay built against the old
+734-        // profile (the paged view may already be holding pages).
+735-        rebuild_analysis_overlay();
+736:        if (start_in_gate_)
+737-        {
+738:            start_in_gate_ = false;
+739-            enter_gate_mode(
+740-                gate_input_requested_, kBotPaceQpm, gate_bot_accuracy_, midi_port_requested_);
+741-        }
+742-    }
+743-
+744-    if (flow_autoplay_ && transport_ok)
+745-    {
+746-        flow_.play();
+747-        flow_autoplay_ = false;
+748-    }
+749-    scroll_y_ = std::clamp(scroll_y_, 0.0f, max_scroll());
+750-    if (callbacks_ != nullptr)
+751-        callbacks_->request_frame();
+752-}
+753-
+754-EngraveParams ScoreRuntime::current_engrave_params() const
+755-{
+756-    EngraveParams params;
+--
+1092-    // exited the game), drop the now-stale result rather than forcing Roll back.
+1093-    if (view_mode_ != ViewMode::Flow || flow_.mode() != FlowController::TransportMode::Roll)
+1094-        return;
+1095-    // Install at the CURRENT playhead (the old window kept advancing while the
+1096-    // engrave ran); carry replays the transport/verdicts onto the fresh strip.
+1097-    const int first_bar = done.first_bar;
+1098-    const int count = done.count;
+1099-    const auto install_start = std::chrono::steady_clock::now();
+1100-    const double install_position_q = carry ? stream_position_q() : intent_position_q;
+1101-    install_window(std::move(done.window), first_bar, count, done.stream_offset_q,
+1102-        install_position_q, carry, preserve_tempo);
+1103-    const double install_ms = std::chrono::duration<double, std::milli>(
+1104-        std::chrono::steady_clock::now() - install_start)
+1105-                                  .count();
+1106-    DRAXUL_LOG_DEBUG(LogCategory::App, "score: window -> bars %d..%d (%.1f ms install, async)",
+1107-        first_bar, first_bar + count - 1, install_ms);
+1108-}
+1109-
+1110:void ScoreRuntime::toggle_flow_mode()
+1111-{
+1112-    if (!engine_ || !engine_->is_loaded())
+1113-        return;
+1114-    stream_->cancel_async();
+1115-    if (view_mode_ == ViewMode::Paged)
+1116-    {
+1117-        view_mode_ = ViewMode::Flow;
+1118-        flow_dirty_ = true; // re-engrave as the strip on the next pump
+1119-        // Returning to the runner: request Roll before the flow build primes
+1120-        // the slicer. The build then installs a rolling window when supported
+1121-        // or applies its existing whole-piece fallback.
+1122:        if (game_mode_ == FlowController::TransportMode::Roll)
+1123:            start_in_gate_ = true;
+1124-    }
+1125-    else
+1126-    {
+1127-        if (flow_.mode() == FlowController::TransportMode::Gate)
+1128-            exit_gate_mode();
+1129-        view_mode_ = ViewMode::Paged;
+1130-        flow_.pause();
+1131-        layout_dirty_ = true; // re-engrave pages; scroll_y_ carries over
+1132-    }
+1133-    if (callbacks_ != nullptr)
+1134-        callbacks_->request_frame();
+1135-}
+1136-
+1137-void ScoreRuntime::apply_lit_update()
+1138-{
+1139-    const FlowController::LitUpdate update = flow_.take_lit_update();
+1140-    if (update.reset)
+1141-        highlight_.clear_lit();
+--
+1250-
+1251-void ScoreRuntime::release_audio_output()
+1252-{
+1253-    audio_->shutdown();
+1254-    audio_lease_.reset();
+1255-}
+1256-
+1257-void ScoreRuntime::release_input_device()
+1258-{
+1259-    input_rig_.clear();
+1260-    input_lease_.reset();
+1261-}
+1262-
+1263-void ScoreRuntime::enter_gate_mode(
+1264-    GateInput input, double bot_pace_qpm, double bot_accuracy, int midi_port)
+1265-{
+1266-    if (!flow_.gates_ready())
+1267-        return;
+1268:    if (game_mode_ == FlowController::TransportMode::Roll && stream_->windowed() && stream_->slicer().ready())
+1269-    {
+1270-        // The runner plays on the rolling window from stream bar 0, with
+1271-        // a fresh program (mastery persists in the player model, not here).
+1272-        stream_->verdict_archive().clear();
+1273-        reset_stream_plan();
+1274-        if (!rebuild_window(0, 0.0, /*carry=*/false))
+1275:            flow_.set_mode(game_mode_); // fell back to the monolithic strip
+1276-        else if (stream_->async_in_flight())
+1277:            flow_.set_mode(game_mode_); // old strip stays interactive while replacing it
+1278-    }
+1279-    else
+1280-    {
+1281:        flow_.set_mode(game_mode_);
+1282-    }
+1283-    highlight_.clear_lit();
+1284-    apply_verdict_update(); // consume the reset
+1285-    set_gate_input(input, bot_pace_qpm, bot_accuracy, midi_port);
+1286-    // The gate transport starts immediately for every input: it just glides
+1287-    // to the first onset and WAITS there. Space pauses/resumes.
+1288-    flow_.play();
+1289:    if (game_mode_ == FlowController::TransportMode::Roll)
+1290-        begin_progress_session();
+1291-    last_logged_gate_ = 0;
+1292-    logged_gate_end_ = false;
+1293-    if (callbacks_ != nullptr)
+1294-        callbacks_->request_frame();
+1295-}
+1296-
+1297:void ScoreRuntime::exit_gate_mode()
+1298-{
+1299-    end_progress_session();
+1300-    stream_->cancel_async();
+1301-    release_input_device();
+1302-    flow_.set_mode(FlowController::TransportMode::Clock);
+1303-    if (stream_active())
+1304-    {
+1305-        // The engine holds a window document; the clock conveyor wants the
+1306-        // whole piece back (relayout_flow reloads the source).
+1307-        stream_->verdict_archive().clear();
+1308-        flow_dirty_ = true;
+1309-    }
+1310-    highlight_.clear_lit();
+1311-    apply_lit_update(); // consume the reset; re-light anything at q <= 0
+1312-    if (callbacks_ != nullptr)
+1313-        callbacks_->request_frame();
+1314-}
+1315-
+--
+1925-    }
+1926-    if (!event.pressed)
+1927-        return;
+1928-    if (event.keycode == SDLK_F)
+1929-    {
+1930-        toggle_flow_mode();
+1931-        return;
+1932-    }
+1933-    if (view_mode_ == ViewMode::Flow)
+1934-    {
+1935-        if (handle_gate_key(event.keycode))
+1936-        {
+1937-            if (callbacks_ != nullptr)
+1938-                callbacks_->request_frame();
+1939-            return;
+1940-        }
+1941-        if (event.keycode == SDLK_G && flow_.mode() == FlowController::TransportMode::Clock && flow_.gates_ready())
+1942-        {
+1943:            game_mode_ = FlowController::TransportMode::Roll; // `g` = the game
+1944-            enter_gate_mode(GateInput::Keyboard, 0.0, 1.0);
+1945-            return;
+1946-        }
+1947-        switch (event.keycode)
+1948-        {
+1949-        case SDLK_SPACE:
+1950-            if (flow_.playing())
+1951-                flow_.pause();
+1952-            else
+1953-                flow_.play();
+1954-            break;
+1955-        case SDLK_LEFTBRACKET:
+1956-            flow_.set_tempo_qpm(flow_.tempo_qpm() / 1.04);
+1957-            break;
+1958-        case SDLK_RIGHTBRACKET:
+1959-            flow_.set_tempo_qpm(flow_.tempo_qpm() * 1.04);
+1960-            break;
+1961-        case SDLK_R:
+tests/support/scoreview_host_fixture.h-190-        host.apply_inspector_intents(intents);
+tests/support/scoreview_host_fixture.h-191-    }
+tests/support/scoreview_host_fixture.h-192-
+tests/support/scoreview_host_fixture.h-193-    static bool slicer_ready(const ScoreHost& host)
+tests/support/scoreview_host_fixture.h-194-    {
+tests/support/scoreview_host_fixture.h-195-        return host.stream_->slicer().ready();
+tests/support/scoreview_host_fixture.h-196-    }
+tests/support/scoreview_host_fixture.h-197-
+tests/support/scoreview_host_fixture.h:198:    static void toggle_flow_mode(ScoreHost& host)
+tests/support/scoreview_host_fixture.h-199-    {
+tests/support/scoreview_host_fixture.h:200:        host.toggle_flow_mode();
+tests/support/scoreview_host_fixture.h-201-    }
+tests/support/scoreview_host_fixture.h-202-
+tests/support/scoreview_host_fixture.h-203-    static void relayout_flow(ScoreHost& host)
+tests/support/scoreview_host_fixture.h-204-    {
+tests/support/scoreview_host_fixture.h-205-        host.relayout_flow();
+tests/support/scoreview_host_fixture.h-206-    }
+tests/support/scoreview_host_fixture.h-207-
+tests/support/scoreview_host_fixture.h:208:    static FlowController::TransportMode transport_mode(const ScoreHost& host)
+tests/support/scoreview_host_fixture.h-209-    {
+tests/support/scoreview_host_fixture.h-210-        return host.flow_.mode();
+tests/support/scoreview_host_fixture.h-211-    }
+tests/support/scoreview_host_fixture.h-212-
+tests/support/scoreview_host_fixture.h-213-    static bool stream_active(const ScoreHost& host)
+tests/support/scoreview_host_fixture.h-214-    {
+tests/support/scoreview_host_fixture.h-215-        return host.stream_active();
+tests/support/scoreview_host_fixture.h-216-    }
+--
+tests/scoreview_host_orchestration_tests.cpp-346-  )xml");
+tests/scoreview_host_orchestration_tests.cpp-347-
+tests/scoreview_host_orchestration_tests.cpp-348-    std::string error;
+tests/scoreview_host_orchestration_tests.cpp-349-    REQUIRE(ScoreHostTestAccess::prime_paged(host,
+tests/scoreview_host_orchestration_tests.cpp-350-        std::make_unique<DeterministicLayoutEngine>(engine_state, svg, false),
+tests/scoreview_host_orchestration_tests.cpp-351-        source, error));
+tests/scoreview_host_orchestration_tests.cpp-352-    REQUIRE_FALSE(ScoreHostTestAccess::slicer_ready(host));
+tests/scoreview_host_orchestration_tests.cpp-353-
+tests/scoreview_host_orchestration_tests.cpp:354:    ScoreHostTestAccess::toggle_flow_mode(host);
+tests/scoreview_host_orchestration_tests.cpp-355-    ScoreHostTestAccess::relayout_flow(host);
+tests/scoreview_host_orchestration_tests.cpp-356-
+tests/scoreview_host_orchestration_tests.cpp:357:    CHECK(ScoreHostTestAccess::transport_mode(host)
+tests/scoreview_host_orchestration_tests.cpp-358-        == draxul::scoreview::FlowController::TransportMode::Roll);
+tests/scoreview_host_orchestration_tests.cpp-359-    CHECK(ScoreHostTestAccess::stream_active(host));
+tests/scoreview_host_orchestration_tests.cpp-360-    CHECK(ScoreHostTestAccess::waterfall_note_count(host) > 0);
+tests/scoreview_host_orchestration_tests.cpp-361-}
+tests/scoreview_host_orchestration_tests.cpp-362-
+tests/scoreview_host_orchestration_tests.cpp-363-TEST_CASE("score audio can prefer a staged piano lazily",
+tests/scoreview_host_orchestration_tests.cpp-364-    "[scoreview][host][orchestration][audio]")
+tests/scoreview_host_orchestration_tests.cpp-365-{
+product/draxul-scoreview/src/score_runtime.h: The system cannot find the file specified. (os error 2)
+
+2026-08-25T07:48:02.927344Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 98 column 5
+exec
+"C:\\Users\\cmaughan\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\native\\powershell\\pwsh.exe" -Command 'rg -n "begin_progress_session|end_progress_session|progress_session|input_lease_|release_input_device|gate_input|game_mode_|flow_autoplay_" product/draxul-scoreview tests | Select-Object -First 240' in C:\Users\cmaughan\AppData\Local\Temp\draxul-review-codex-_42h86sl\workspace
+ succeeded in 5024ms:
+product/draxul-scoreview\include\draxul\scoreview\score_runtime.h:254:    void begin_progress_session();
+product/draxul-scoreview\include\draxul\scoreview\score_runtime.h:255:    void end_progress_session();
+product/draxul-scoreview\include\draxul\scoreview\score_runtime.h:269:    bool set_gate_input(
+product/draxul-scoreview\include\draxul\scoreview\score_runtime.h:273:    void release_input_device();
+product/draxul-scoreview\include\draxul\scoreview\score_runtime.h:322:    bool flow_autoplay_ = false;
+product/draxul-scoreview\include\draxul\scoreview\score_runtime.h:334:    GateInput gate_input_requested_ = GateInput::Keyboard;
+product/draxul-scoreview\include\draxul\scoreview\score_runtime.h:340:    FlowController::TransportMode game_mode_ = FlowController::TransportMode::Roll;
+product/draxul-scoreview\include\draxul\scoreview\score_runtime.h:438:    std::unique_ptr<IScoreDeviceLease> input_lease_;
+product/draxul-scoreview\src\score_runtime.cpp:189:        gate_input_requested_ = GateInput::Keyboard;
+product/draxul-scoreview\src\score_runtime.cpp:190:        game_mode_ = FlowController::TransportMode::Roll;
+product/draxul-scoreview\src\score_runtime.cpp:200:            game_mode_ = FlowController::TransportMode::Gate;
+product/draxul-scoreview\src\score_runtime.cpp:202:                gate_input_requested_ = GateInput::Bot;
+product/draxul-scoreview\src\score_runtime.cpp:204:                gate_input_requested_ = GateInput::Mic;
+product/draxul-scoreview\src\score_runtime.cpp:210:                gate_input_requested_ = GateInput::Mic;
+product/draxul-scoreview\src\score_runtime.cpp:215:            flow_autoplay_ = command.find("autoplay") != std::string::npos;
+product/draxul-scoreview\src\score_runtime.cpp:304:    end_progress_session();
+product/draxul-scoreview\src\score_runtime.cpp:308:    release_input_device();
+product/draxul-scoreview\src\score_runtime.cpp:341:        release_input_device();
+product/draxul-scoreview\src\score_runtime.cpp:347:            && gate_input_requested_ != GateInput::Keyboard)
+product/draxul-scoreview\src\score_runtime.cpp:349:            set_gate_input(gate_input_requested_, 0.0,
+product/draxul-scoreview\src\score_runtime.cpp:740:                gate_input_requested_, kBotPaceQpm, gate_bot_accuracy_, midi_port_requested_);
+product/draxul-scoreview\src\score_runtime.cpp:744:    if (flow_autoplay_ && transport_ok)
+product/draxul-scoreview\src\score_runtime.cpp:747:        flow_autoplay_ = false;
+product/draxul-scoreview\src\score_runtime.cpp:1122:        if (game_mode_ == FlowController::TransportMode::Roll)
+product/draxul-scoreview\src\score_runtime.cpp:1165:bool ScoreRuntime::set_gate_input(
+product/draxul-scoreview\src\score_runtime.cpp:1169:    release_input_device();
+product/draxul-scoreview\src\score_runtime.cpp:1200:                input_lease_ = std::move(acquired.lease);
+product/draxul-scoreview\src\score_runtime.cpp:1215:        release_input_device();
+product/draxul-scoreview\src\score_runtime.cpp:1257:void ScoreRuntime::release_input_device()
+product/draxul-scoreview\src\score_runtime.cpp:1260:    input_lease_.reset();
+product/draxul-scoreview\src\score_runtime.cpp:1268:    if (game_mode_ == FlowController::TransportMode::Roll && stream_->windowed() && stream_->slicer().ready())
+product/draxul-scoreview\src\score_runtime.cpp:1275:            flow_.set_mode(game_mode_); // fell back to the monolithic strip
+product/draxul-scoreview\src\score_runtime.cpp:1277:            flow_.set_mode(game_mode_); // old strip stays interactive while replacing it
+product/draxul-scoreview\src\score_runtime.cpp:1281:        flow_.set_mode(game_mode_);
+product/draxul-scoreview\src\score_runtime.cpp:1285:    set_gate_input(input, bot_pace_qpm, bot_accuracy, midi_port);
+product/draxul-scoreview\src\score_runtime.cpp:1289:    if (game_mode_ == FlowController::TransportMode::Roll)
+product/draxul-scoreview\src\score_runtime.cpp:1290:        begin_progress_session();
+product/draxul-scoreview\src\score_runtime.cpp:1299:    end_progress_session();
+product/draxul-scoreview\src\score_runtime.cpp:1301:    release_input_device();
+product/draxul-scoreview\src\score_runtime.cpp:1332:        const bool engaged = set_gate_input(next, 0.0, 1.0);
+product/draxul-scoreview\src\score_runtime.cpp:1333:        gate_input_requested_ = engaged ? next : GateInput::Keyboard;
+product/draxul-scoreview\src\score_runtime.cpp:1448:void ScoreRuntime::begin_progress_session()
+product/draxul-scoreview\src\score_runtime.cpp:1459:void ScoreRuntime::end_progress_session()
+product/draxul-scoreview\src\score_runtime.cpp:1468:    begin_progress_session(); // session_active_ is false after clear — starts fresh
+product/draxul-scoreview\src\score_runtime.cpp:1530:                gate_input_requested_ = GateInput::Keyboard;
+product/draxul-scoreview\src\score_runtime.cpp:1531:                set_gate_input(GateInput::Keyboard, 0.0, 1.0);
+product/draxul-scoreview\src\score_runtime.cpp:1779:        gate_input_requested_ = GateInput::Keyboard;
+product/draxul-scoreview\src\score_runtime.cpp:1780:        set_gate_input(GateInput::Keyboard, 0.0, 1.0);
+product/draxul-scoreview\src\score_runtime.cpp:1784:        gate_input_requested_ = GateInput::Mic;
+product/draxul-scoreview\src\score_runtime.cpp:1785:        set_gate_input(GateInput::Mic, 0.0, 1.0);
+product/draxul-scoreview\src\score_runtime.cpp:1789:        gate_input_requested_ = GateInput::Midi;
+product/draxul-scoreview\src\score_runtime.cpp:1791:        if (set_gate_input(GateInput::Midi, 0.0, 1.0, *intents.select_midi_port)
+product/draxul-scoreview\src\score_runtime.cpp:1943:            game_mode_ = FlowController::TransportMode::Roll; // `g` = the game
+tests\support\scoreview_host_fixture.h:152:        return host.set_gate_input(input, 60.0, 1.0, midi_port);
+
+2026-08-25T07:48:26.495898Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 98 column 5
+exec
+"C:\\Users\\cmaughan\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\native\\powershell\\pwsh.exe" -Command "Get-Content -LiteralPath 'tests/support/scoreview_host_fixture.h' | Select-Object -First 225; \""'`n<<<PROGRESS>>>`n"; Get-Content -LiteralPath '"'product/draxul-scoreview/src/score_runtime.cpp' | Select-Object -Skip 1435 -First 50; \""'`n<<<HEADER_FIELDS>>>`n"; Get-Content -LiteralPath '"'product/draxul-scoreview/include/draxul/scoreview/score_runtime.h' | Select-Object -Skip 300 -First 155" in C:\Users\cmaughan\AppData\Local\Temp\draxul-review-codex-_42h86sl\workspace
+ succeeded in 5752ms:
+#pragma once
+
+// Headless ScoreHost fixture (kanban 15): the shared test seam and fakes for
+// driving the real host without a window, renderer, audio device, user
+// dialog, or real Verovio toolkit. ScoreHostTestAccess is the ONE friend of
+// ScoreHost (declared in score_host.h) — its definition lives here so every
+// host-level suite shares it. The blockable DeterministicLayoutEngine fake
+// (and its permit/wait helpers) lives in scoreview_engine_fake.h so suites
+// that cannot see controller internals share the same engine fake.
+
+#include "scoreview_engine_fake.h"
+
+#include <draxul/scoreview/player_input_rig.h>
+#include <draxul/scoreview/score_runtime.h>
+
+#include "score_stream_controller.h"
+#include "score_view_model.h"
+
+#include <chrono>
+#include <condition_variable>
+#include <filesystem>
+#include <fstream>
+#include <memory>
+#include <mutex>
+#include <sstream>
+#include <string>
+#include <string_view>
+#include <thread>
+#include <vector>
+
+namespace draxul
+{
+namespace scoreview
+{
+
+using ScoreHost = ScoreRuntime;
+
+// This is the sole friend of ScoreHost used by tests. It drives the same
+// methods as the UI while keeping test setup independent of devices.
+class ScoreHostTestAccess
+{
+public:
+    using GateInput = ScoreHost::GateInput;
+
+    static bool prime_window(ScoreHost& host, std::unique_ptr<ILayoutEngine> engine,
+        std::string_view source, std::string& error)
+    {
+        host.engine_ = std::move(engine);
+        host.source_bytes_ = std::string(source);
+        if (!host.stream_->load_source(std::string(source), error))
+            return false;
+        host.view_mode_ = ScoreHost::ViewMode::Flow;
+        host.stream_->set_windowed(true);
+        host.stream_->set_active(false);
+        host.stream_->set_initial_window_installed(false);
+        host.piece_marking_qpm_ = 120.0;
+        if (!host.rebuild_window(0, 0.0, false))
+        {
+            error = "initial synchronous window build failed";
+            return false;
+        }
+        return true;
+    }
+
+    static bool prime_paged(ScoreHost& host, std::unique_ptr<ILayoutEngine> engine,
+        std::string_view source, std::string& error)
+    {
+        if (!engine->load(source, error))
+            return false;
+        host.engine_ = std::move(engine);
+        host.source_bytes_ = std::string(source);
+        host.view_mode_ = ScoreHost::ViewMode::Paged;
+        host.layout_dirty_ = true;
+        return true;
+    }
+
+    static void inject_engraver(ScoreHost& host, std::unique_ptr<WindowEngraver> engraver)
+    {
+        host.stream_->adopt_engraver(std::move(engraver));
+    }
+
+    static void set_transport(ScoreHost& host, double position_q, double tempo_qpm, bool playing)
+    {
+        host.flow_.seek(position_q);
+        host.flow_.set_tempo_qpm(tempo_qpm);
+        if (playing)
+            host.flow_.play();
+        else
+            host.flow_.pause();
+    }
+
+    static void restart(ScoreHost& host)
+    {
+        host.restart_stream(true);
+    }
+
+    static void restyle_current_window(ScoreHost& host)
+    {
+        host.proportional_spacing_ = !host.proportional_spacing_;
+        host.reengrave_flow_in_place();
+    }
+
+    static void poll(ScoreHost& host)
+    {
+        host.poll_async_engrave();
+    }
+
+    static void deliver_stale_completion(ScoreHost& host, WindowEngraver::RequestId request_id)
+    {
+        WindowEngraver::Done done;
+        done.request_id = request_id;
+        done.ok = true;
+        host.handle_async_engrave_done(std::move(done));
+    }
+
+    static std::shared_ptr<const ScoreDrawList> strip(const ScoreHost& host)
+    {
+        return host.strip_;
+    }
+
+    static WindowEngraver::RequestId pending_request(const ScoreHost& host)
+    {
+        return host.stream_->pending_request();
+    }
+
+    static bool async_pending(const ScoreHost& host)
+    {
+        return host.stream_->async_in_flight();
+    }
+
+    static double position_q(const ScoreHost& host)
+    {
+        return host.flow_.position_q();
+    }
+
+    static double tempo_qpm(const ScoreHost& host)
+    {
+        return host.flow_.tempo_qpm();
+    }
+
+    static bool playing(const ScoreHost& host)
+    {
+        return host.flow_.playing();
+    }
+
+    // Input selection (kanban 15/16): the same swap-in-place path the UI
+    // uses. Mic is deliberately not offered here — it would touch the real
+    // permission/device layer; MicPlayerInput has its own fake-ops suite.
+    static bool select_input(
+        ScoreHost& host, GateInput input, int midi_port = -1)
+    {
+        return host.set_gate_input(input, 60.0, 1.0, midi_port);
+    }
+
+    static PlayerInputRig::Kind input_kind(const ScoreHost& host)
+    {
+        return host.input_rig_.kind();
+    }
+
+    static void relayout_paged(ScoreHost& host, int width = 800, int height = 600)
+    {
+        host.viewport_.pixel_size = { width, height };
+        host.viewport_.pixel_scale = 1.0f;
+        host.view_mode_ = ScoreHost::ViewMode::Paged;
+        host.relayout();
+    }
+
+    static size_t paged_guided_glyph_count(const ScoreHost& host)
+    {
+        size_t guided = 0;
+        if (!host.page_note_highlights_)
+            return 0;
+        for (const ScoreHighlightState& colors : *host.page_note_highlights_)
+        {
+            for (const uint8_t guide : colors.glyph_guide)
+                guided += guide != 0 ? 1 : 0;
+        }
+        return guided;
+    }
+
+    static bool show_note_colors(const ScoreHost& host)
+    {
+        return host.show_note_colors_;
+    }
+
+    static void set_note_colors(ScoreHost& host, bool on)
+    {
+        ScoreInspectorIntents intents;
+        intents.show_note_colors = on;
+        host.apply_inspector_intents(intents);
+    }
+
+    static bool slicer_ready(const ScoreHost& host)
+    {
+        return host.stream_->slicer().ready();
+    }
+
+    static void toggle_flow_mode(ScoreHost& host)
+    {
+        host.toggle_flow_mode();
+    }
+
+    static void relayout_flow(ScoreHost& host)
+    {
+        host.relayout_flow();
+    }
+
+    static FlowController::TransportMode transport_mode(const ScoreHost& host)
+    {
+        return host.flow_.mode();
+    }
+
+    static bool stream_active(const ScoreHost& host)
+    {
+        return host.stream_active();
+    }
+
+    static size_t waterfall_note_count(const ScoreHost& host)
+    {
+        return host.waterfall_notes_.size();
+    }
+};
+
+inline std::string read_verovio_svg_fixture()
+{
+
+<<<PROGRESS>>>
+
+double ScoreRuntime::quarters_per_measure_from_model() const
+{
+    if (!has_model_ || model_.parts.empty())
+        return 0.0;
+    for (const auto& measure : model_.parts[0].measures)
+    {
+        if (measure.time)
+            return measure.time->measure_duration().to_double() * 4.0;
+    }
+    return 0.0;
+}
+
+void ScoreRuntime::begin_progress_session()
+{
+    if (!session_->begin_session())
+        return;
+    // Resume at yesterday's pace: the stored tempo informs the start, still
+    // clamped to the marking band. Fresh pieces keep the 60% default. The
+    // tempo lock overrides this — it holds the marking regardless.
+    if (!lock_tempo_ && session_->model().last_tempo_frac() > 0.0 && flow_.ready())
+        flow_.set_tempo_qpm(flow_.marking_qpm() * session_->model().last_tempo_frac());
+}
+
+void ScoreRuntime::end_progress_session()
+{
+    session_->end_session(
+        flow_.marking_qpm() > 0.0 ? flow_.tempo_qpm() / flow_.marking_qpm() : 0.0);
+}
+
+void ScoreRuntime::clear_piece_progress()
+{
+    session_->clear_progress();
+    begin_progress_session(); // session_active_ is false after clear — starts fresh
+    session_->save(/*final_flush=*/false); // overwrite the file with the cleared model
+    // Restart the stream from the top so the composer re-plans against a blank
+    // slate. A cleared record is the one restart that RESETS the tempo — a
+    // fresh learner starts at the 60% ramp again.
+    restart_stream(/*keep_tempo=*/false);
+    DRAXUL_LOG_INFO(LogCategory::App, "score: cleared progress for this piece");
+}
+
+int ScoreRuntime::approx_measure() const
+{
+    if (!flow_.ready() || !has_model_)
+        return 0;
+    const double quarters_per_measure = quarters_per_measure_from_model();
+    if (quarters_per_measure <= 0.0)
+        return 0;
+    if (const auto source = playhead_source())
+        return source->source_bar + 1; // a drill shows its reference bar
+
+<<<HEADER_FIELDS>>>
+
+    // Window-clear / chrome-facing background; kept identical to the terminal
+    // scheme (see default_background()). The score's own backdrop is a NanoVG
+    // fill inside the pane.
+    draxul::Color background_{ 0.08f, 0.09f, 0.10f, 1.0f };
+    float zoom_ = 1.0f;
+    float scroll_y_ = 0.0f;
+    float page_width_px_ = 0.0f;
+    float page_height_px_ = 0.0f;
+    float page_scale_ = 0.0f;
+    bool layout_dirty_ = true;
+    bool running_ = false;
+    bool quiesced_ = false;
+    bool presentation_visible_ = true;
+    bool background_playback_ = false;
+    bool resume_transport_on_show_ = false;
+
+    // Conveyor state (plans/scoreview-conveyor.md). The strip is the whole
+    // piece as one system; the controller owns transport/tempo/lit diffs and
+    // the highlight overlay carries per-op flags for the renderer.
+    ViewMode view_mode_ = ViewMode::Paged;
+    bool flow_dirty_ = false;
+    bool flow_autoplay_ = false;
+    std::shared_ptr<const ScoreDrawList> strip_;
+    FlowController flow_;
+    ScoreHighlightState highlight_;
+    std::chrono::steady_clock::time_point last_pump_{};
+
+    // Gate state (plans/scoreview-gate.md). The rig owns the live input
+    // implementation and the selection/fallback policy; the host talks to
+    // the seam plus narrow device capabilities and never names a concrete
+    // input type.
+    PlayerInputRig input_rig_;
+    bool start_in_gate_ = false;
+    GateInput gate_input_requested_ = GateInput::Keyboard;
+    // The MIDI port the inspector selected (index into the rig's
+    // list_midi_ports at selection time); -1 = none chosen yet.
+    int midi_port_requested_ = -1;
+    // Which game the transport plays: Roll (the runner — default) or Gate
+    // (wait mode, kept as a dev/verification instrument).
+    FlowController::TransportMode game_mode_ = FlowController::TransportMode::Roll;
+    double gate_bot_accuracy_ = 1.0;
+    std::chrono::steady_clock::time_point epoch_{};
+    size_t last_logged_gate_ = 0;
+    bool logged_gate_end_ = false;
+
+    // The rolling-window stream (kanban 21 ScoreStreamController): slicing,
+    // the composer + program, the verdict archive, window bookkeeping, the
+    // advance policy, and the async-engrave worker state machine. The host
+    // keeps the sync engrave (main engine), the install swap, and the
+    // view/transport checks. Internal component; never null.
+    std::unique_ptr<ScoreStreamController> stream_;
+    std::string source_bytes_;
+    double piece_marking_qpm_ = 0.0;
+
+    // The frame composer (kanban 21 ScorePresentation): NanoVG recording
+    // for flow/paged/placeholder plus the fixed-sheet scale-lock cache.
+    // Internal component; never null.
+    std::unique_ptr<ScorePresentation> presentation_;
+    // The score occupies a FIXED band — this fraction of the pane height —
+    // and the sheet scales (locked) to fill it, so it never jumps or resizes
+    // as the window scrolls. Adjustable in the debug UI.
+    float score_height_frac_ = 0.40f;
+    // Whole-piece note coloring: element id -> pairing-palette index for
+    // every note in the current engraving, resolved once per window build
+    // (spelling comes from the engine there). Every note wears its color on
+    // the sheet always; the keyboard reuses these indices for its lit keys.
+    std::unordered_map<std::string, int> note_palette_;
+    // note id -> engraved staff for the current window (1 = RH, 2 = LH);
+    // captured at engrave time alongside the palette.
+    std::unordered_map<std::string, int> note_staff_;
+
+    // Waterfall (piano-roll) between the score and the keyboard: each note
+    // falls as a colored block toward its key, block height = its duration in
+    // beats, landing exactly as the transport crosses its onset (a visual
+    // timing hint). Built from the timemap's on/off pairs per engraving.
+    // WaterfallNote is defined in engraved_window.h so the background engraver
+    // can produce the blocks off the main thread.
+    std::vector<WaterfallNote> waterfall_notes_;
+    bool show_waterfall_ = true;
+    double waterfall_beats_ = 7.0; // beats of look-ahead the zone shows
+    // Articulation: a played note holds for this fraction of its notated
+    // length, so blocks and key-lights end early and successive notes get
+    // daylight between them (there is always a subjective pause). ~0.95 is a
+    // gentle legato; low values read as staccato.
+    double note_gate_ = 0.95;
+
+    // Wrong-note marking: a wrong note gets a small cross over its head (the
+    // note keeps its spelling color); false leaves the sheet unmarked.
+    bool mark_mistakes_ = true;
+    bool show_note_colors_ = true;
+    // Sharp/flat notehead cue: true = the half-color-over-black split, false =
+    // accidentals wear their full spelling color like the naturals.
+    bool split_accidentals_ = true;
+    // Composer: true = the adaptive stream (reviews, drills, simplification,
+    // spaced openings, error re-serve — plans/scoreview-composer.md C0-C4),
+    // false = just scroll the original piece bar-by-bar, unchanged. ON by
+    // default (C6): the structure-aware, clean-pass-gated program is the
+    // product; `nocomposer` (launch token or inspector) opts back out.
+    // Sources the slicer cannot open (.mxl zips, multi-part scores) still
+    // stream verbatim — composer support is per-source (IComposer::supports).
+    bool composer_enabled_ = true;
+    // Which IComposer the stream runs (kanban 22 selection seam). The
+    // `composer=<name>` launch token overrides the adaptive-stream default;
+    // an unknown name is warned and falls back.
+    std::string composer_name_ = "adaptive-stream";
+    // Pedagogy sub-toggles, forwarded to the composer: fabricated chord
+    // drills and scale fragments. Default OFF pending evaluation.
+    bool composer_drills_ = false;
+    bool composer_scales_ = false;
+    // Spacing experiment (inspector-only): engrave the flow strip with note
+    // space proportional to duration so the conveyor scrolls at near-constant
+    // speed and score columns align with the waterfall. The paged reading
+    // view always keeps authentic engraving spacing.
+    bool proportional_spacing_ = false;
+    // Spacing-debug slider overrides (inspector). Negative = follow the
+    // preset above; set, they win over it. Applied on slider release (a
+    // re-engrave costs ~100ms — never per drag frame).
+    float spacing_linear_override_ = -1.0f;
+    float spacing_non_linear_override_ = -1.0f;
+    // Tempo lock: true = play at the piece's proper marking with no Roll-mode
+    // adaptation (the runner won't ease the tempo from accuracy).
+    bool lock_tempo_ = false;
+    int ladder_bar_ = -1; // last bar the tempo ladder was applied for
+    int seen_dirty_passes_ = 0; // rewrite trigger edge (model's monotonic count)
+
+    // Player memory + persistence (kanban 21 ScoreSessionController): the
+    // per-piece model, progress file, session clock, flush policy, and the
+    // cached piece analysis. Internal component; never null.
+    std::unique_ptr<ScoreSessionController> session_;
+
+    // The audio rig (kanban 21 ScoreAudioController): output stream,
+    // metronome, audition, instrument voices, soundfont
+    // staging. Internal component — SDL-audio details never cross into the
+    // host. Never null (constructed with the host).
+    std::unique_ptr<ScoreAudioController> audio_;
+    std::shared_ptr<IScoreDeviceLeaseProvider> device_leases_;
+    std::unique_ptr<IScoreDeviceLease> audio_lease_;
+    std::unique_ptr<IScoreDeviceLease> input_lease_;
+    std::string device_error_;
+    double quarters_per_bar_ = 4.0;
+
+    // ImGui debug/learning inspector. Its own context (like the other 3D
+    // hosts); a floating window drawn over the score, toggled with `\``.
+    plugin_support::PluginImGuiContext imgui_;
+    std::string imgui_font_path_;
+    float imgui_font_size_pixels_ = 13.0f;
+    bool show_debug_ui_ = true;
+    std::chrono::steady_clock::time_point last_imgui_time_{};
+};
+
+} // namespace scoreview
+} // namespace draxul
+
+2026-08-25T07:48:38.920964Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 98 column 5
+codex
+### kanban/pending/scoreview-paged-runner-teardown -bug.md
+
+# Tear down ScoreView performance sessions before showing the paged view
+
+**Type:** bug  
+**Priority:** P1  
+**Raised by:** Claude and Codex  
+**Consensus:** Both input reviews
+
+## Problem
+
+`ScoreRuntime::toggle_flow_mode()` calls `exit_gate_mode()` only for `Gate`. Leaving `Roll` therefore keeps the progress session and microphone/MIDI lease active while the paged reading view is displayed.
+
+## Implementation
+
+- [ ] Route both `Roll` and `Gate` through `exit_gate_mode()` when switching from Flow to Paged.
+- [ ] End the progress session and stop practice-time accrual.
+- [ ] Cancel pending stream work and release the active input device lease.
+- [ ] Leave the transport paused in `Clock` mode before rendering pages.
+- [ ] Preserve the intended performance mode separately for a later return to Flow.
+
+## Tests
+
+- [ ] Add a Roll → Paged orchestration test.
+- [ ] Assert the transport becomes `Clock` and is paused.
+- [ ] Assert the input rig and fake microphone/MIDI lease are released.
+- [ ] Assert the progress session ends and paged-view time is not recorded as practice.
+- [ ] Retain Gate → Paged teardown coverage.
+
+## Acceptance criteria
+
+- [ ] No input device remains leased in the paged view.
+- [ ] No practice time accrues in the paged view.
+- [ ] Neither `Roll` nor `Gate` remains active behind paged rendering.
+- [ ] Existing ScoreView host orchestration tests pass.
+
+### kanban/pending/scoreview-paged-round-trip-transport-intent -bug.md
+
+# Preserve ScoreView transport intent across paged round trips
+
+**Type:** bug  
+**Priority:** P2  
+**Raised by:** Claude and Codex  
+**Consensus:** Both input reviews
+
+## Problem
+
+Paged → Flow re-entry is hard-coded around `game_mode_ == Roll`. This prevents `Gate` from returning after a round trip, while explicit `flow` and `flow-autoplay` launches can unexpectedly become Roll because `game_mode_` retains its default value.
+
+## Implementation
+
+- [ ] Represent the intended Flow transport mode explicitly as `Clock`, `Roll`, or `Gate`.
+- [ ] Initialize that intent correctly for `paged`, `flow`, `flow-autoplay`, `roll*`, and `gate*` launch modes.
+- [ ] Preserve the intent when tearing down an active performance session for Paged.
+- [ ] Re-enter `Roll` or `Gate` from Paged using the recorded intent and input configuration.
+- [ ] Keep explicit clock-conveyor modes in `Clock`; do not auto-start Roll.
+- [ ] Keep window/slicer capability limited to choosing rolling-window versus monolithic rendering, not transport mode.
+
+## Tests
+
+- [ ] Preserve the new paged-launch → Roll test before slicer priming.
+- [ ] Add Roll → Paged → Roll coverage.
+- [ ] Add Gate → Paged → Gate coverage.
+- [ ] Add `flow` and `flow-autoplay` round-trip tests asserting `Clock`.
+- [ ] Cover sliceable, `mono`, and non-sliceable sources such as `.mxl` or one-bar scores.
+
+## Acceptance criteria
+
+- [ ] Every launch mode returns from Paged to its intended transport mode.
+- [ ] Gate remains reachable after a paged round trip.
+- [ ] Explicit flow modes never change to Roll implicitly.
+- [ ] Transport selection behaves consistently regardless of windowing support.
+- [ ] Existing ScoreView host orchestration tests pass.
+2026-08-25T07:49:46.622146Z  WARN codex_core::hook_runtime: after_agent hook failed; continuing turn_id=01a037e2-7d79-7cd0-910c-509c9e173f2e hook_name=legacy_notify error=The system cannot find the path specified. (os error 3)
+tokens used
+31,524

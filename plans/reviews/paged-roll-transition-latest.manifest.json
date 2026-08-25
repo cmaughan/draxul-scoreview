@@ -1,0 +1,44 @@
+{
+  "finished_at": "2026-08-22T16:30:25.353171+00:00",
+  "kind": "review",
+  "name": "paged-roll-transition",
+  "prompt": "D:\\dev\\Draxul\\plugins\\scoreview\\.codex-scoreview-review-prompt.md",
+  "reviewers": [
+    {
+      "company": "openai",
+      "duration_seconds": 515.328,
+      "error": "",
+      "fallback_reason": "",
+      "model": "gpt-5.6-sol",
+      "preflight": "passed",
+      "preflight_message": "live response verified",
+      "report": "runs\\20260822T162121Z-paged-roll-transition-2c9e8410\\reports\\openai.codex.gpt-5-6-sol.md",
+      "requested": "codex",
+      "sandbox_fallback": "",
+      "sha256": "031a0fbb6d920367aa0dc78a3d805c738f296b8b05e8dd77ec5620feebe4cdd7",
+      "status": "passed",
+      "transport": "codex",
+      "version": "codex-cli 0.146.1"
+    },
+    {
+      "company": "anthropic",
+      "duration_seconds": 479.0,
+      "error": "",
+      "fallback_reason": "",
+      "model": "opus",
+      "preflight": "passed",
+      "preflight_message": "live response verified",
+      "report": "runs\\20260822T162121Z-paged-roll-transition-2c9e8410\\reports\\anthropic.claude.opus.md",
+      "requested": "claude",
+      "sandbox_fallback": "",
+      "sha256": "760575f5d808e2cd2efacdb7ac65516596a6c13e90ae15198e1592726c8a9383",
+      "status": "passed",
+      "transport": "claude",
+      "version": "2.1.234 (Claude Code)"
+    }
+  ],
+  "run_id": "20260822T162121Z-paged-roll-transition-2c9e8410",
+  "schema_version": 1,
+  "started_at": "2026-08-22T16:21:21.985722+00:00",
+  "status": "complete"
+}

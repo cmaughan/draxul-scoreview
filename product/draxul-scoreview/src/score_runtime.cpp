@@ -1116,11 +1116,10 @@ void ScoreRuntime::toggle_flow_mode()
     {
         view_mode_ = ViewMode::Flow;
         flow_dirty_ = true; // re-engrave as the strip on the next pump
-        // Returning to the runner: if the piece supports the rolling Roll
-        // window, re-arm it (the flow build re-enters it via start_in_gate_);
-        // otherwise this falls through to the whole-piece conveyor.
-        if (game_mode_ == FlowController::TransportMode::Roll && stream_->windowed()
-            && stream_->slicer().ready())
+        // Returning to the runner: request Roll before the flow build primes
+        // the slicer. The build then installs a rolling window when supported
+        // or applies its existing whole-piece fallback.
+        if (game_mode_ == FlowController::TransportMode::Roll)
             start_in_gate_ = true;
     }
     else

@@ -328,6 +328,38 @@ TEST_CASE("full-score note colors resolve after the paged timemap is available",
     CHECK(ScoreHostTestAccess::paged_guided_glyph_count(host) > 0);
 }
 
+TEST_CASE("switching a paged score enters the rolling play view before the slicer is primed",
+    "[scoreview][host][orchestration][view]")
+{
+    auto engine_state = std::make_shared<FakeEngineState>();
+    ScoreHost host;
+    const std::string svg = read_verovio_svg_fixture();
+    REQUIRE_FALSE(svg.empty());
+
+    std::string source(kScoreHostFixtureMinimalScore);
+    const size_t part_end = source.rfind("</part>");
+    REQUIRE(part_end != std::string::npos);
+    source.insert(part_end, R"xml(
+    <measure number="2">
+      <note><pitch><step>D</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note>
+    </measure>
+  )xml");
+
+    std::string error;
+    REQUIRE(ScoreHostTestAccess::prime_paged(host,
+        std::make_unique<DeterministicLayoutEngine>(engine_state, svg, false),
+        source, error));
+    REQUIRE_FALSE(ScoreHostTestAccess::slicer_ready(host));
+
+    ScoreHostTestAccess::toggle_flow_mode(host);
+    ScoreHostTestAccess::relayout_flow(host);
+
+    CHECK(ScoreHostTestAccess::transport_mode(host)
+        == draxul::scoreview::FlowController::TransportMode::Roll);
+    CHECK(ScoreHostTestAccess::stream_active(host));
+    CHECK(ScoreHostTestAccess::waterfall_note_count(host) > 0);
+}
+
 TEST_CASE("score audio can prefer a staged piano lazily",
     "[scoreview][host][orchestration][audio]")
 {
