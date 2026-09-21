@@ -1,6 +1,6 @@
 #include <draxul/scoreview/engraved_window.h>
 
-#include <draxul/scoreview/keyboard_render_nvg.h>
+#include <draxul/scoreview/keyboard_layout.h>
 #include <draxul/scoreview/score_timemap.h>
 #include <draxul/scoreview/svg_score_interpreter.h>
 

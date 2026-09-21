@@ -13,18 +13,18 @@ tests to use the lighter core test target.
 
 ## Boundary verification
 
-- [ ] Verify `analysis_overlay.cpp` construction and draw regions have no hidden shared mutable state.
-- [ ] Inventory all declarations/callers in `analysis_overlay.h`, `ScoreHost`, and `ScorePresentation`.
-- [ ] Confirm core construction requires only draw-list, timemap, highlight, and learning profile values.
-- [ ] Confirm drawing alone needs `NVGcontext` and `ScoreTextFonts`.
-- [ ] Record current overlay test cases and host-level replay coverage before moving them.
+- [x] Verify `analysis_overlay.cpp` construction and draw regions have no hidden shared mutable state.
+- [x] Inventory all declarations/callers in `analysis_overlay.h`, `ScoreHost`, and `ScorePresentation`.
+- [x] Confirm core construction requires only draw-list, timemap, highlight, and learning profile values.
+- [x] Confirm drawing alone needs `NVGcontext` and `ScoreTextFonts`.
+- [x] Record current overlay geometry coverage before moving it; NanoVG replay coverage remains host-side.
 
 ## Implementation and migration
 
-- [ ] Keep `AnalysisOverlay` values and `build_analysis_overlay` in the public core header.
+- [x] Keep `AnalysisOverlay` values and `build_analysis_overlay` in the public core header.
 - [ ] Move construction to `analysis_overlay_build.cpp` in `draxul-scoreview`.
 - [ ] Move NanoVG replay to `analysis_overlay_draw.cpp` and a host-private draw header.
-- [ ] Update `ScoreHost`/`ScorePresentation` includes and target source lists.
+- [ ] Update `ScoreHost`/`ScorePresentation` includes and target source lists (presentation include updated; target source migration waits for CMake release).
 - [ ] Move `scoreview_overlay_tests.cpp` from host test sources to core ScoreView test sources.
 - [ ] Do not reopen or redesign the completed ScoreView controllers retained in
   repository history.
@@ -46,7 +46,7 @@ tests to use the lighter core test target.
 
 ## Agent documentation and tooling
 
-- [ ] Update Score nested guidance/module map if it lists overlay ownership.
+- [x] Update Score module ownership documentation.
 - [ ] Ensure label tooling builds core-only overlay tests for `--label scoreview`.
 
 ## Acceptance criteria

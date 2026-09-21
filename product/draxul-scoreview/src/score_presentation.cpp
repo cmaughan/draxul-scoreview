@@ -1,8 +1,9 @@
 #include "score_presentation.h"
 
+#include "analysis_overlay_draw.h"
 #include "score_stream_controller.h" // kWindowHistoryBars/kWindowAheadBars
 
-#include <draxul/scoreview/keyboard_render_nvg.h>
+#include "keyboard_render_nvg.h"
 #include <draxul/scoreview/score_render_nvg.h>
 
 #include "nanovg.h"
@@ -129,7 +130,8 @@ void draw_placeholder(NVGcontext* vg, int width, int height, float pixel_scale)
 
 } // namespace
 
-void ScorePresentation::record_flow(INanoVGPass& pass, const FlowFrame& frame)
+void ScorePresentation::record_flow(
+    plugin_support::IPluginNanoVGPass& pass, const FlowFrame& frame)
 {
     // The conveyor: the whole piece as one strip on a full-width band,
     // scrolled so the playhead anchor tracks the transport position.
@@ -365,14 +367,15 @@ void ScorePresentation::record_flow(INanoVGPass& pass, const FlowFrame& frame)
         });
 }
 
-void ScorePresentation::record_placeholder(INanoVGPass& pass, float pixel_scale)
+void ScorePresentation::record_placeholder(
+    plugin_support::IPluginNanoVGPass& pass, float pixel_scale)
 {
     pass.set_draw_callback([pixel_scale](NVGcontext* vg, int w, int h) {
         draw_placeholder(vg, w, h, pixel_scale);
     });
 }
 
-void ScorePresentation::record_paged(INanoVGPass& pass,
+void ScorePresentation::record_paged(plugin_support::IPluginNanoVGPass& pass,
     std::shared_ptr<const std::vector<ScoreDrawList>> pages, float pixel_scale, float margin,
     float gap, float scroll, float page_w, float page_h, float scale,
     std::shared_ptr<const AnalysisOverlay> overlay,

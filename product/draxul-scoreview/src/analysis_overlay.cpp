@@ -1,6 +1,8 @@
 #include <draxul/scoreview/analysis_overlay.h>
 
-#include <draxul/scoreview/keyboard_render_nvg.h>
+#include "analysis_overlay_draw.h"
+
+#include <draxul/scoreview/keyboard_layout.h>
 #include <draxul/scoreview/score_render_nvg.h>
 
 #include <nanovg.h>

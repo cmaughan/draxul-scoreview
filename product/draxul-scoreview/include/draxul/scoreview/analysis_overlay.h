@@ -10,7 +10,8 @@
 // Split like the rest of the module: build_analysis_overlay is PURE (draw
 // lists + timemap + profile in, canvas-space geometry out) so tests can
 // assert placement without a GPU; draw_analysis_overlay replays a built page
-// through NanoVG.
+// through NanoVG. Replay declarations stay in the presentation-private
+// analysis_overlay_draw.h header.
 
 #include <draxul/scoreview/piece_analysis.h>
 #include <draxul/scoreview/score_draw_list.h>
@@ -23,14 +24,10 @@
 #include <string>
 #include <vector>
 
-struct NVGcontext;
-
 namespace draxul
 {
 namespace scoreview
 {
-
-struct ScoreTextFonts;
 
 struct AnalysisOverlay
 {
@@ -123,25 +120,6 @@ AnalysisOverlay build_analysis_overlay(const std::vector<ScoreDrawList>& pages,
     const Timemap& timemap, const PieceProfile& profile,
     const std::vector<double>& bar_starts_q,
     const std::function<int(const std::string&)>& midi_pitch = {});
-
-// Replays one page's annotations. origin/scale are the same mapping
-// render_draw_list used for that page, so the green lands on the engraving.
-// `unique_active`: the unique-chunks wash is also drawing, which carries its
-// own centered "P11 = P1" — the lane label would duplicate it.
-void draw_analysis_overlay(NVGcontext* vg, const AnalysisOverlay& overlay,
-    const AnalysisOverlay::Page& page, glm::vec2 origin, float scale, float pixel_scale,
-    const ScoreTextFonts& fonts, bool unique_active = false);
-
-// The unique-chunks view ('s'): ghosts every restated phrase under a paper
-// wash labelled with the phrase it repeats, so only NEW material reads at
-// full strength — the piece's actual size, seen directly.
-void draw_unique_wash(NVGcontext* vg, const AnalysisOverlay::Page& page, glm::vec2 origin,
-    float scale, float pixel_scale, const ScoreTextFonts& fonts);
-
-// The one-line summary, pinned to the viewport's top-left corner (screen
-// space, independent of scroll).
-void draw_analysis_banner(NVGcontext* vg, const AnalysisOverlay& overlay, float pixel_scale,
-    const ScoreTextFonts& fonts);
 
 } // namespace scoreview
 } // namespace draxul

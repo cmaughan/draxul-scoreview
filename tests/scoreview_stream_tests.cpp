@@ -20,6 +20,31 @@
 
 using namespace draxul::scoreview;
 
+namespace
+{
+
+std::string multipart_score_xml(int second_part_measure_count)
+{
+    std::string second_part;
+    for (int measure = 1; measure <= second_part_measure_count; ++measure)
+    {
+        second_part += "<measure number=\"" + std::to_string(measure)
+            + "\"><note><rest/><duration>1</duration><type>quarter</type></note></measure>";
+    }
+    return "<?xml version=\"1.0\"?><score-partwise version=\"4.0\">"
+           "<part-list><score-part id=\"P1\"><part-name>Top</part-name></score-part>"
+           "<score-part id=\"P2\"><part-name>Bottom</part-name></score-part></part-list>"
+           "<part id=\"P1\"><measure number=\"1\"><attributes><divisions>1</divisions>"
+           "<time><beats>4</beats><beat-type>4</beat-type></time></attributes>"
+           "<note><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration>"
+           "<type>quarter</type></note></measure><measure number=\"2\"><note><pitch>"
+           "<step>D</step><octave>4</octave></pitch><duration>1</duration><type>quarter</type>"
+           "</note></measure></part><part id=\"P2\">"
+        + second_part + "</part></score-partwise>";
+}
+
+} // namespace
+
 TEST_CASE("slicer indexes the Grieg and its bar geometry", "[scoreview][stream]")
 {
     SourceSlicer slicer;
@@ -32,6 +57,29 @@ TEST_CASE("slicer indexes the Grieg and its bar geometry", "[scoreview][stream]"
     CHECK(slicer.bar_at(0.5) == 0);
     CHECK(slicer.bar_at(3.0) == 1);
     CHECK(slicer.bar_at(10000.0) == 78); // clamped
+}
+
+TEST_CASE("multipart slicing rejects a window missing from a later part",
+    "[scoreview][stream]")
+{
+    SourceSlicer slicer;
+    std::string error;
+    REQUIRE(slicer.load(multipart_score_xml(1), error));
+    CHECK(slicer.bar_count() == 2);
+    CHECK(slicer.window_xml(0, 2).empty());
+}
+
+TEST_CASE("multipart slicing preserves equal-length parts and their state",
+    "[scoreview][stream]")
+{
+    SourceSlicer slicer;
+    std::string error;
+    REQUIRE(slicer.load(multipart_score_xml(2), error));
+    const std::string window = slicer.window_xml(1, 1);
+    REQUIRE_FALSE(window.empty());
+    CHECK(window.find("<part id=\"P1\">") != std::string::npos);
+    CHECK(window.find("<part id=\"P2\">") != std::string::npos);
+    CHECK(window.find("<divisions>1</divisions>") != std::string::npos);
 }
 
 TEST_CASE("a mid-piece window engraves identically to the monolith", "[scoreview][stream]")

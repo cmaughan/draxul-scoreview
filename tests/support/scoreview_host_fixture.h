@@ -157,6 +157,11 @@ public:
         return host.input_rig_.kind();
     }
 
+    static int miss_count(const ScoreHost& host)
+    {
+        return host.flow_.miss_count();
+    }
+
     static void relayout_paged(ScoreHost& host, int width = 800, int height = 600)
     {
         host.viewport_.pixel_size = { width, height };

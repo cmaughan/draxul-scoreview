@@ -1,6 +1,6 @@
 #pragma once
 
-#include <draxul/nanovg_pass.h>
+#include <draxul/plugin_nanovg_pass.h>
 #include <draxul/plugin_runtime.h>
 #include <draxul/plugin_imgui_context.h>
 #include <draxul/notation/score_document.h>
@@ -63,7 +63,7 @@ class ScoreFrameSink
 {
 public:
     virtual ~ScoreFrameSink() = default;
-    virtual void record_canvas(draxul::INanoVGPass& pass,
+    virtual void record_canvas(draxul::plugin_support::IPluginNanoVGPass& pass,
         int x, int y, int width, int height) = 0;
     virtual void render_overlay(void* draw_data, void* context) = 0;
     virtual void finish() = 0;
@@ -71,6 +71,7 @@ public:
 
 struct ScoreRuntimePaths
 {
+    std::filesystem::path nanovg_assets;
     std::filesystem::path verovio_data;
     std::filesystem::path soundfonts;
     std::filesystem::path progress;
@@ -129,7 +130,7 @@ public:
     draxul::PluginRuntimeState runtime_state() const;
     draxul::PluginDebugState debug_state() const;
     ScorePrintHint print_hint() const;
-    draxul::INanoVGPass* canvas_pass() const
+    draxul::plugin_support::IPluginNanoVGPass* canvas_pass() const
     {
         return nanovg_pass_.get();
     }
@@ -279,7 +280,7 @@ private:
     ScoreViewModel build_view_model() const;
     void apply_inspector_intents(const ScoreInspectorIntents& intents);
 
-    std::unique_ptr<draxul::INanoVGPass> nanovg_pass_;
+    std::unique_ptr<draxul::plugin_support::IPluginNanoVGPass> nanovg_pass_;
     draxul::PluginRuntimeViewport viewport_;
     ScoreRuntimeCallbacks* callbacks_ = nullptr;
 

@@ -7,17 +7,17 @@
 
 ## Boundary verification
 
-- [ ] Inventory geometry, palette, presentation values, draw callers, and tests.
-- [ ] Confirm which overlay code requires palette APIs.
-- [ ] Record palette bytes and representative key positions.
+- [x] Inventory geometry, palette, presentation values, draw callers, and tests.
+- [x] Confirm that the overlay builder and NanoVG renderers share only palette APIs.
+- [x] Retain the established palette bytes and representative key-position coverage.
 
 ## Implementation and migration
 
-- [ ] Add public core `keyboard_layout.h`.
-- [ ] Move MIDI bounds, geometry, and palette APIs into it.
-- [ ] Move `KeyboardLit` and draw declarations to a host-private header.
-- [ ] Update core/host includes.
-- [ ] Remove `keyboard_render_nvg.h` without forwarding duplication.
+- [x] Add public core `keyboard_layout.h`.
+- [x] Move MIDI bounds, geometry, and palette APIs into it.
+- [x] Move `KeyboardLit` and draw declarations to a host-private header.
+- [x] Update core/host includes.
+- [x] Remove the public `keyboard_render_nvg.h` without forwarding duplication.
 - [ ] Extract keyboard tests from the host-classified composer suite.
 
 ## Unit tests
@@ -34,7 +34,7 @@
 
 ## Agent documentation/tooling
 
-- [ ] Update the Score nested guide/module map under pending `08`.
+- [x] Update the Score module ownership reference.
 
 ## Acceptance criteria
 

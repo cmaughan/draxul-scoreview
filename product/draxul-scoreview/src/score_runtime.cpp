@@ -6,7 +6,7 @@
 #include <draxul/imgui_input_bridge.h>
 #include <draxul/log.h>
 #include <draxul/notation/musicxml_importer.h>
-#include <draxul/scoreview/keyboard_render_nvg.h>
+#include <draxul/scoreview/keyboard_layout.h>
 #include <draxul/scoreview/piece_analysis.h>
 #include <draxul/scoreview/progress_store.h>
 #include <draxul/scoreview/score_render_nvg.h>
@@ -91,7 +91,8 @@ bool ScoreRuntime::initialize(const PluginRuntimeContext& context,
     device_leases_ = paths.device_leases
         ? std::move(paths.device_leases) : process_score_device_leases();
 
-    nanovg_pass_ = create_nanovg_pass();
+    nanovg_pass_ = plugin_support::create_plugin_nanovg_pass(
+        { .asset_root = std::move(paths.nanovg_assets) });
     if (!nanovg_pass_)
     {
         init_error_ = "failed to create NanoVG render pass";
@@ -344,7 +345,7 @@ void ScoreRuntime::set_presentation_visible(bool visible,
     else if (visible)
     {
         if (flow_.mode() != FlowController::TransportMode::Clock
-            && gate_input_requested_ != GateInput::Keyboard)
+            && !input_rig_.active())
         {
             set_gate_input(gate_input_requested_, 0.0,
                 gate_bot_accuracy_, midi_port_requested_);

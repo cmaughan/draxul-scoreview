@@ -297,6 +297,27 @@ TEST_CASE("hidden presentation pauses transport unless background playback is en
     CHECK(background.host.next_deadline().has_value());
 }
 
+TEST_CASE("showing a paused keyboard gate restores input before transport",
+    "[scoreview][host][orchestration][visibility][keyboard]")
+{
+    PrimedHost primed;
+    REQUIRE(primed.prime());
+    REQUIRE(ScoreHostTestAccess::select_input(
+        primed.host, ScoreHostTestAccess::GateInput::Keyboard));
+    ScoreHostTestAccess::set_transport(primed.host, 1.5, 96.0, true);
+    const int misses_before = ScoreHostTestAccess::miss_count(primed.host);
+
+    primed.host.set_presentation_visible(false);
+    CHECK(ScoreHostTestAccess::input_kind(primed.host)
+        == PlayerInputRig::Kind::None);
+    primed.host.set_presentation_visible(true);
+
+    CHECK(ScoreHostTestAccess::input_kind(primed.host)
+        == PlayerInputRig::Kind::Keyboard);
+    CHECK(ScoreHostTestAccess::playing(primed.host));
+    CHECK(ScoreHostTestAccess::miss_count(primed.host) == misses_before);
+}
+
 TEST_CASE("full-score note colors are on by default and inspector-toggleable",
     "[scoreview][host][orchestration][view]")
 {

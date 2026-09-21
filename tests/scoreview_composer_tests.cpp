@@ -7,7 +7,7 @@
 
 #include "support/scoreview_engrave_helpers.h"
 
-#include <draxul/scoreview/keyboard_render_nvg.h>
+#include <draxul/scoreview/keyboard_layout.h>
 #include <draxul/scoreview/score_timemap.h>
 #include <draxul/scoreview/source_slicer.h>
 #include <draxul/scoreview/stream_composer.h>
