@@ -106,6 +106,27 @@ TEST_CASE("a sourceless host runs one full headless lifecycle",
     CHECK(callbacks->frames == frames_at_shutdown);
 }
 
+TEST_CASE("a completed flow layout reports content ready",
+    "[scoreview][host][orchestration][render-ready]")
+{
+    CountingHostCallbacks callbacks;
+    ScoreHost host;
+
+    PluginRuntimeContext context;
+    context.initial_viewport = viewport(800, 600);
+    REQUIRE(host.initialize(context, callbacks));
+
+    const std::string svg = read_verovio_svg_fixture();
+    REQUIRE_FALSE(svg.empty());
+    auto engine_state = std::make_shared<FakeEngineState>();
+    std::string error;
+    REQUIRE(ScoreHostTestAccess::prime_window(host,
+        std::make_unique<DeterministicLayoutEngine>(engine_state, svg, false),
+        kScoreHostFixtureMinimalScore, error));
+
+    CHECK(host.runtime_state().content_ready);
+}
+
 TEST_CASE("a missing source fails initialize cleanly and shutdown stays safe",
     "[scoreview][host][orchestration]")
 {

@@ -2214,7 +2214,10 @@ Color ScoreRuntime::default_background() const
 PluginRuntimeState ScoreRuntime::runtime_state() const
 {
     PluginRuntimeState state;
-    state.content_ready = running_ && (!engine_ || pages_ != nullptr);
+    const bool layout_ready = view_mode_ == ViewMode::Flow
+        ? strip_ != nullptr
+        : pages_ != nullptr;
+    state.content_ready = running_ && (!engine_ || layout_ready);
     return state;
 }
 

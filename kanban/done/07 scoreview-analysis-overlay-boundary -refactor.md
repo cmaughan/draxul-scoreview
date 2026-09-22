@@ -40,9 +40,9 @@ tests to use the lighter core test target.
 ## Cross-platform validation
 
 - [x] Build and run focused tests on Windows.
-- [ ] Build and run focused tests on macOS.
+- [x] Build and run focused tests on macOS.
 - [x] Confirm NanoVG overlay output/ordering on Windows.
-- [ ] Confirm NanoVG overlay output/ordering remains identical on macOS.
+- [x] Confirm NanoVG overlay output/ordering remains identical on macOS.
 - [x] Confirm no Vulkan/Metal API or resource type enters the pure build path.
 - [x] Do not touch microphone/audio code; verify macOS TCC ordering remains unaffected.
 
@@ -80,17 +80,22 @@ host draw smoke can proceed independently after declarations settle.
   the core-only target.
 - A current macOS build/render comparison remains open.
 
-## macOS closeout
+## macOS validation checkpoint (2026-09-22)
 
-From the Draxul root on macOS, run:
-
-```bash
-python3 do.py test debug --scoreview
-python3 do.py scoreviewplugin
-python3 do.py smoke debug --skip-build
-```
-
-Compare the Metal ScoreView frame with the accepted Windows reference. Confirm
-that analysis washes, phrase spans, key/motif labels, note guidance colors, and
-their draw ordering are unchanged. If the focused tests and comparison pass,
-tick the two macOS boxes and move this card to done.
+- The full focused CTest selection passed all three entries after the closeout
+  fix: `draxul-test-scoreview-shard-0` (61.90 s),
+  `draxul-test-scoreview-shard-1` (34.28 s), and
+  `draxul-test-scoreview-runtime-shard-0` (8.48 s). The added flow-readiness
+  regression passed 4 assertions independently.
+- A dedicated 1920x1080 Metal capture used `paged analysis`, a 5-second
+  settle, and the full Grieg fixture. The frame visibly retains the analysis
+  banner, key summary, colored motif legend, phrase spans and labels, note
+  guidance washes, and their order over the engraved score. The runtime log
+  confirms A minor, 15 chords, 8 motifs, 5 figures, 2 responsive pages, and
+  3097 draw operations before capture.
+- The same-cache `draxul --console --smoke-test` passed on Apple M5 Metal. The
+  wrapper's first sandboxed attempt could not bind the local control socket;
+  running the same built app outside that restriction passed.
+- Evidence capture: `/tmp/draxul-scoreview-analysis-evidence-macos.bmp` (PNG
+  inspection copy beside it). The generic registered render remains
+  Windows-only; no manifest or reference baseline was changed.

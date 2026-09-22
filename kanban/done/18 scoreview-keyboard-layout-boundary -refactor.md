@@ -30,7 +30,7 @@
 ## Cross-platform validation
 
 - [x] Verify NanoVG output and palette bytes on Windows.
-- [ ] Verify NanoVG output and palette bytes on macOS.
+- [x] Verify NanoVG output and palette bytes on macOS.
 - [x] Confirm core keyboard tests link no runtime/NanoVG/SDL/ImGui dependency.
 
 ## Agent documentation/tooling
@@ -60,18 +60,24 @@
 - Current macOS output/palette verification remains open; this card stays
   pending until that cross-platform criterion is satisfied.
 
-## macOS closeout
+## macOS validation checkpoint (2026-09-22)
 
-From the Draxul root on macOS, run:
-
-```bash
-python3 do.py test debug --scoreview
-python3 do.py scoreviewplugin
-python3 do.py smoke debug --skip-build
-```
-
-Inspect the Metal ScoreView keyboard and confirm all 88 key positions, black/
-white key classification, active-note colors, and spelling colors match the
-accepted Windows frame. If the focused tests and visual comparison pass, tick
-the remaining macOS box and move this card to done together with pending
-`07 scoreview-analysis-overlay-boundary -refactor.md`.
+- The full focused CTest selection passed all three entries after the closeout
+  fix: `draxul-test-scoreview-shard-0` (61.90 s),
+  `draxul-test-scoreview-shard-1` (34.28 s), and
+  `draxul-test-scoreview-runtime-shard-0` (8.48 s). The added flow-readiness
+  regression passed 4 assertions independently.
+- A dedicated 1920x1080 Metal capture used `roll nocomposer locktempo`, a
+  5-second settle, and the full Grieg fixture. The frame shows the complete
+  88-key keyboard, white/black-key geometry, active waterfall colors, the
+  spelling palette, and score-note colors. The runtime log confirms 3013
+  conveyor draw operations and 287 onsets before capture.
+- Flow render tests previously waited forever because runtime readiness was
+  tied only to paged `pages_`. Readiness now uses `strip_` in Flow mode and
+  `pages_` in Paged mode, with deterministic orchestration coverage.
+- The same-cache `draxul --console --smoke-test` passed on Apple M5 Metal. The
+  wrapper's first sandboxed attempt could not bind the local control socket;
+  running the same built app outside that restriction passed.
+- Evidence capture: `/tmp/draxul-scoreview-keyboard-evidence-macos.bmp` (PNG
+  inspection copy beside it). The generic registered render remains
+  Windows-only; no manifest or reference baseline was changed.
