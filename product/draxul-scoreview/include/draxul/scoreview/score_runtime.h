@@ -339,6 +339,7 @@ private:
     // Which game the transport plays: Roll (the runner — default) or Gate
     // (wait mode, kept as a dev/verification instrument).
     FlowController::TransportMode game_mode_ = FlowController::TransportMode::Roll;
+    double gate_bot_pace_qpm_ = 50.0;
     double gate_bot_accuracy_ = 1.0;
     std::chrono::steady_clock::time_point epoch_{};
     size_t last_logged_gate_ = 0;

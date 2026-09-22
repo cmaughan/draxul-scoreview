@@ -204,6 +204,22 @@ public:
     }
 };
 
+class RejectingMicrophoneLeaseProvider final
+    : public draxul::scoreview::IScoreDeviceLeaseProvider
+{
+public:
+    draxul::scoreview::ScoreDeviceLeaseResult acquire(
+        draxul::scoreview::ScoreDeviceKind kind,
+        std::string_view, const void*) override
+    {
+        if (kind == draxul::scoreview::ScoreDeviceKind::Microphone)
+            ++microphone_requests;
+        return { {}, "deterministic device contention" };
+    }
+
+    int microphone_requests = 0;
+};
+
 } // namespace
 
 TEST_CASE("a layout failure degrades to the monolithic fallback, shutdown stays safe",
@@ -290,20 +306,121 @@ TEST_CASE("hidden presentation pauses transport unless background playback is en
 
     PrimedHost background;
     REQUIRE(background.prime());
+    REQUIRE(ScoreHostTestAccess::select_input(
+        background.host, ScoreHostTestAccess::GateInput::Bot));
     ScoreHostTestAccess::set_transport(background.host, 1.5, 96.0, true);
+    const int background_misses = ScoreHostTestAccess::miss_count(background.host);
     static_cast<draxul::scoreview::ScoreRuntime&>(background.host)
         .set_presentation_visible(false, /*allow_background_playback=*/true);
     CHECK(ScoreHostTestAccess::playing(background.host));
     CHECK(background.host.next_deadline().has_value());
+    CHECK(ScoreHostTestAccess::input_kind(background.host)
+        == PlayerInputRig::Kind::Bot);
+    CHECK(ScoreHostTestAccess::miss_count(background.host) == background_misses);
 }
 
-TEST_CASE("showing a paused keyboard gate restores input before transport",
-    "[scoreview][host][orchestration][visibility][keyboard]")
+TEST_CASE("showing a paused gate restores every device-free input path before transport",
+    "[scoreview][host][orchestration][visibility][input]")
 {
+    using GateInput = ScoreHostTestAccess::GateInput;
+    struct InputCase
+    {
+        const char* name;
+        GateInput requested;
+        int midi_port;
+        bool request_engages;
+        PlayerInputRig::Kind engaged;
+    };
+    const InputCase cases[] = {
+        { "keyboard", GateInput::Keyboard, -1, true,
+            PlayerInputRig::Kind::Keyboard },
+        { "bot", GateInput::Bot, -1, true, PlayerInputRig::Kind::Bot },
+        // An unavailable hardware port follows the production fallback while
+        // retaining the MIDI request that visibility will retry on show.
+        { "unavailable MIDI", GateInput::Midi, -1, false,
+            PlayerInputRig::Kind::Keyboard },
+    };
+
+    for (const InputCase& input : cases)
+    {
+        DYNAMIC_SECTION(input.name)
+        {
+            PrimedHost primed;
+            REQUIRE(primed.prime());
+            CHECK(ScoreHostTestAccess::select_input(
+                      primed.host, input.requested, input.midi_port)
+                == input.request_engages);
+            REQUIRE(ScoreHostTestAccess::input_kind(primed.host)
+                == input.engaged);
+            if (input.requested == GateInput::Bot)
+            {
+                CHECK(ScoreHostTestAccess::bot_pace_qpm(primed.host)
+                    == Catch::Approx(60.0));
+            }
+            ScoreHostTestAccess::set_transport(primed.host, 1.5, 96.0, true);
+            const int misses_before = ScoreHostTestAccess::miss_count(primed.host);
+
+            primed.host.set_presentation_visible(false);
+            CHECK(ScoreHostTestAccess::input_kind(primed.host)
+                == PlayerInputRig::Kind::None);
+            primed.host.set_presentation_visible(true);
+
+            CHECK(ScoreHostTestAccess::input_kind(primed.host)
+                == input.engaged);
+            if (input.requested == GateInput::Bot)
+            {
+                CHECK(ScoreHostTestAccess::bot_pace_qpm(primed.host)
+                    == Catch::Approx(60.0));
+            }
+            CHECK(ScoreHostTestAccess::playing(primed.host));
+            CHECK(ScoreHostTestAccess::miss_count(primed.host) == misses_before);
+        }
+    }
+}
+
+TEST_CASE("visibility releases input leases only when background playback is disabled",
+    "[scoreview][host][orchestration][visibility][devices]")
+{
+    using draxul::scoreview::ScoreDeviceKind;
+    const auto verify_policy = [](bool allow_background_playback) {
+        auto provider = draxul::scoreview::create_score_device_lease_provider();
+        PrimedHost primed;
+        REQUIRE(primed.prime());
+        REQUIRE(ScoreHostTestAccess::acquire_input_lease(primed.host,
+            provider, ScoreDeviceKind::Microphone, "default"));
+
+        primed.host.set_presentation_visible(
+            false, allow_background_playback);
+
+        int competing_owner = 0;
+        auto competing = provider->acquire(ScoreDeviceKind::Microphone,
+            "default", &competing_owner);
+        CHECK(static_cast<bool>(competing.lease)
+            == !allow_background_playback);
+    };
+
+    DYNAMIC_SECTION("foreground-only")
+    {
+        verify_policy(false);
+    }
+    DYNAMIC_SECTION("background playback")
+    {
+        verify_policy(true);
+    }
+}
+
+TEST_CASE("showing a paused microphone gate retries its lease without phantom misses",
+    "[scoreview][host][orchestration][visibility][devices]")
+{
+    auto leases = std::make_shared<RejectingMicrophoneLeaseProvider>();
     PrimedHost primed;
     REQUIRE(primed.prime());
-    REQUIRE(ScoreHostTestAccess::select_input(
-        primed.host, ScoreHostTestAccess::GateInput::Keyboard));
+    ScoreHostTestAccess::set_device_lease_provider(primed.host, leases);
+    CHECK_FALSE(ScoreHostTestAccess::select_input(
+        primed.host, ScoreHostTestAccess::GateInput::Mic));
+    REQUIRE(leases->microphone_requests == 1);
+    REQUIRE(ScoreHostTestAccess::input_kind(primed.host)
+        == PlayerInputRig::Kind::Keyboard);
     ScoreHostTestAccess::set_transport(primed.host, 1.5, 96.0, true);
     const int misses_before = ScoreHostTestAccess::miss_count(primed.host);
 
@@ -312,6 +429,7 @@ TEST_CASE("showing a paused keyboard gate restores input before transport",
         == PlayerInputRig::Kind::None);
     primed.host.set_presentation_visible(true);
 
+    CHECK(leases->microphone_requests == 2);
     CHECK(ScoreHostTestAccess::input_kind(primed.host)
         == PlayerInputRig::Kind::Keyboard);
     CHECK(ScoreHostTestAccess::playing(primed.host));

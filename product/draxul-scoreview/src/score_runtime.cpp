@@ -347,7 +347,7 @@ void ScoreRuntime::set_presentation_visible(bool visible,
         if (flow_.mode() != FlowController::TransportMode::Clock
             && !input_rig_.active())
         {
-            set_gate_input(gate_input_requested_, 0.0,
+            set_gate_input(gate_input_requested_, gate_bot_pace_qpm_,
                 gate_bot_accuracy_, midi_port_requested_);
         }
         if (resume_transport_on_show_ && !flow_.at_end())
@@ -1168,6 +1168,11 @@ bool ScoreRuntime::set_gate_input(
     GateInput input, double bot_pace_qpm, double bot_accuracy, int midi_port)
 {
     const GateInput requested = input;
+    if (input == GateInput::Bot)
+    {
+        gate_bot_pace_qpm_ = std::max(bot_pace_qpm, 1.0);
+        gate_bot_accuracy_ = std::clamp(bot_accuracy, 0.0, 1.0);
+    }
     release_input_device();
     device_error_.clear();
     if (input == GateInput::Mic || input == GateInput::Midi)
@@ -1208,8 +1213,8 @@ bool ScoreRuntime::set_gate_input(
         : input == GateInput::Mic            ? PlayerInputRig::Kind::Mic
         : input == GateInput::Midi           ? PlayerInputRig::Kind::Midi
                                              : PlayerInputRig::Kind::Keyboard;
-    selection.bot_pace_qpm = bot_pace_qpm;
-    selection.bot_accuracy = bot_accuracy;
+    selection.bot_pace_qpm = gate_bot_pace_qpm_;
+    selection.bot_accuracy = gate_bot_accuracy_;
     selection.midi_port = midi_port;
     const bool engaged = input_rig_.select(selection, flow_);
     if (!engaged && (selection.kind == PlayerInputRig::Kind::Mic
