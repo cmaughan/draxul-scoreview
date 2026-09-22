@@ -247,7 +247,7 @@ inline bool wait_for_host_install(ScoreHost& host)
 
 // Counting IHostCallbacks: proves the host requests frames (and nothing
 // else) without a window; lifetime is the test's, so use-after-shutdown
-// would trip sanitizers.
+// would be an invalid lifetime access.
 class CountingHostCallbacks final : public ScoreRuntimeCallbacks
 {
 public:

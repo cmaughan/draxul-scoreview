@@ -39,8 +39,10 @@ tests to use the lighter core test target.
 
 ## Cross-platform validation
 
-- [ ] Build and run focused tests on Windows and macOS.
-- [ ] Confirm NanoVG overlay output/ordering remains identical on both platforms.
+- [x] Build and run focused tests on Windows.
+- [ ] Build and run focused tests on macOS.
+- [x] Confirm NanoVG overlay output/ordering on Windows.
+- [ ] Confirm NanoVG overlay output/ordering remains identical on macOS.
 - [x] Confirm no Vulkan/Metal API or resource type enters the pure build path.
 - [x] Do not touch microphone/audio code; verify macOS TCC ordering remains unaffected.
 
@@ -72,5 +74,23 @@ host draw smoke can proceed independently after declarations settle.
   (0.058%) one-pixel scrollbar-thumb drift. Visual review confirmed the current
   output was intended; the Windows reference was refreshed and the rerun
   passed.
-- A current macOS build/render comparison remains open, so the cross-platform
-  boxes stay unchecked.
+- A direct Windows rerun of `draxul-test-scoreview.exe
+  "[scoreview][overlay]"` passed 483 assertions in 11 test cases. This pins the
+  migrated geometry, ordering, palette indices, and real-Grieg overlay cases in
+  the core-only target.
+- A current macOS build/render comparison remains open.
+
+## macOS closeout
+
+From the Draxul root on macOS, run:
+
+```bash
+python3 do.py test debug --scoreview
+python3 do.py scoreviewplugin
+python3 do.py smoke debug --skip-build
+```
+
+Compare the Metal ScoreView frame with the accepted Windows reference. Confirm
+that analysis washes, phrase spans, key/motif labels, note guidance colors, and
+their draw ordering are unchanged. If the focused tests and comparison pass,
+tick the two macOS boxes and move this card to done.

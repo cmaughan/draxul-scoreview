@@ -40,17 +40,14 @@ ScoreView has several independent background/device edges—engraving, microphon
 - [x] MIDI open failure falls back cleanly (host suite asserts
       requested-vs-engaged); throwing-destructor coverage awaits the
       IMidiBackend fake (card 71).
-- [x] Two ScoreHosts verified independent (own engravers/transports,
-      destroyed in both orders, ASan-clean under the normal run).
+- [x] Two ScoreHosts verified independent (own engravers/transports and
+      destroyed safely in both orders).
 - [x] Late/stale completions are ignored safely (generation filter driven
       directly via the test seam and via the storm).
 - [x] Main-thread operations bounded (<100 ms asserted) in the blocked-worker
       fixture.
-- [ ] Normal runs green and repeatable (seeded). TSan on this dev machine is
-      INCONCLUSIVE: the TSan-built test binary segfaults pre-main in the
-      sanitizer runtime (zero output even for single-threaded suites, no
-      race reports) — an environment issue, not a finding; run via the
-      existing TSan CI wiring instead. ASan job not run here.
+- [ ] Normal runs green and repeatable with fixed seeds on Windows and macOS;
+      assert queue, generation, ownership, and shutdown invariants directly.
 
 ## Dependencies and parallelism
 

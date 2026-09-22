@@ -14,8 +14,8 @@ overlapping, traversal, and decompression-bomb archives.
       deadline limits before untrusted data reaches Verovio.
 - [ ] Reject traversal, duplicate roots, encryption, invalid central-directory data,
       unsupported compression, and excessive expansion with stable error categories.
-- [ ] Generate tiny deterministic negative fixtures and run them repeatedly under the
-      available sanitizers.
+- [ ] Generate tiny deterministic negative fixtures and run them repeatedly in the
+      normal parser and product aggregates.
 - [ ] Preserve valid `.mxl` loading and ordinary MusicXML layout.
 
 Complete this before file-drop routing or a piece library makes `.mxl` opening more

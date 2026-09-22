@@ -29,7 +29,8 @@
 
 ## Cross-platform validation
 
-- [ ] Verify NanoVG output and palette bytes on Windows and macOS.
+- [x] Verify NanoVG output and palette bytes on Windows.
+- [ ] Verify NanoVG output and palette bytes on macOS.
 - [x] Confirm core keyboard tests link no runtime/NanoVG/SDL/ImGui dependency.
 
 ## Agent documentation/tooling
@@ -53,5 +54,24 @@
   (0.058%) one-pixel scrollbar-thumb drift. Visual review confirmed the current
   output was intended; the Windows reference was refreshed and the rerun
   passed.
+- A direct Windows rerun of `draxul-test-scoreview.exe
+  "[scoreview][keyboard]"` passed 247 assertions in 4 test cases, including
+  every exact spelling-palette byte and representative 88-key geometry case.
 - Current macOS output/palette verification remains open; this card stays
   pending until that cross-platform criterion is satisfied.
+
+## macOS closeout
+
+From the Draxul root on macOS, run:
+
+```bash
+python3 do.py test debug --scoreview
+python3 do.py scoreviewplugin
+python3 do.py smoke debug --skip-build
+```
+
+Inspect the Metal ScoreView keyboard and confirm all 88 key positions, black/
+white key classification, active-note colors, and spelling colors match the
+accepted Windows frame. If the focused tests and visual comparison pass, tick
+the remaining macOS box and move this card to done together with pending
+`07 scoreview-analysis-overlay-boundary -refactor.md`.
