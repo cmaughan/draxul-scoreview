@@ -109,16 +109,19 @@ When this repository is the top-level CMake source directory, the build sets
 `DRAXUL_SCOREVIEW_STANDALONE` and resolves the host side with
 `find_package(DraxulPluginSDK CONFIG REQUIRED)` — point `CMAKE_PREFIX_PATH` at a
 prefix where Draxul's `draxul-plugin-sdk` install component has been installed.
-Standalone builds also expect the copied `plugins/support/imgui` and
-`plugins/support/nanovg` trees from Draxul at `../support/imgui` and
-`../support/nanovg-pass` relative to this checkout, plus Draxul's
-`libs/draxul-imgui-core` copied to `../support/imgui-core` (the shared
-scancode/IImGuiHost leaf the support ImGui target consumes; the extraction smoke
-test stages both exactly this way).
+Standalone builds also expect Draxul's copied `plugins/support/imgui` and
+`plugins/support/nanovg` adapter trees at `../support/imgui` and
+`../support/nanovg-pass`, the copied `libs/draxul-nanovg` backend tree at
+`../support/nanovg`, and `libs/draxul-imgui-core` at
+`../support/imgui-core`. The extraction smoke stages this exact layout.
 
 The shared NanoVG adapter links the staged NanoVG backend and, on Vulkan, the
 standalone `draxul-scoreview-vma-impl` target. The adapter never supplies a
 second VMA implementation or retains SDK frame handles after rendering.
+Bundled macOS builds consume only `SDL3::Headers`, allowing the module to use
+the host executable's SDL symbols without registering a second set of SDL
+Objective-C classes. Standalone builds and Windows link `SDL3::SDL3` because
+they own their SDL runtime.
 
 The extraction smoke test, `tests/external_product_plugin_smoke.py`, proves this
 path end to end: it installs the SDK component from a Draxul build, copies this
