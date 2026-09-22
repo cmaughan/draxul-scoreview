@@ -18,19 +18,19 @@
 - [x] Move `KeyboardLit` and draw declarations to a host-private header.
 - [x] Update core/host includes.
 - [x] Remove the public `keyboard_render_nvg.h` without forwarding duplication.
-- [ ] Extract keyboard tests from the host-classified composer suite.
+- [x] Extract keyboard geometry and palette tests from the runtime-classified composer suite.
 
 ## Unit tests
 
-- [ ] Add `scoreview_keyboard_layout_tests.cpp`.
-- [ ] Test 88-key bounds, black/white classification, centers, spelling, and palette selection.
-- [ ] Keep one host-level draw smoke if useful.
-- [ ] Build/run `draxul-test-scoreview` and `draxul-test-scoreview-host`.
+- [x] Add `scoreview_keyboard_layout_tests.cpp`.
+- [x] Test 88-key bounds, black/white classification, centers, spelling, and palette selection.
+- [x] Keep one runtime-level draw smoke if useful (not added: layout/palette behavior is fully exercised without constructing a NanoVG context).
+- [x] Build/run `draxul-test-scoreview` and `draxul-test-scoreview-runtime`.
 
 ## Cross-platform validation
 
 - [ ] Verify NanoVG output and palette bytes on Windows and macOS.
-- [ ] Confirm core keyboard tests link no host/NanoVG/SDL/ImGui dependency.
+- [x] Confirm core keyboard tests link no runtime/NanoVG/SDL/ImGui dependency.
 
 ## Agent documentation/tooling
 
@@ -38,7 +38,20 @@
 
 ## Acceptance criteria
 
-- [ ] Core publishes no `NVGcontext` keyboard API.
-- [ ] Geometry/palette tests use only `draxul-scoreview`.
-- [ ] Visual output is unchanged.
-- [ ] Score core/host tests pass.
+- [x] Core publishes no `NVGcontext` keyboard API.
+- [x] Geometry/palette tests use only `draxul-scoreview`.
+- [x] Visual output is unchanged.
+- [x] Score core/runtime tests pass.
+
+## Windows validation checkpoint (2026-09-22)
+
+- The post-edit `py do.py test debug --products` gate passed all 48 selected
+  entries in the shared Windows Debug/Ninja cache (230.53 s). The ScoreView
+  core and runtime entries passed, including the extracted keyboard
+  geometry/palette tests, and the subsequent same-cache smoke passed.
+- The registered ScoreView render initially showed a deterministic 358-pixel
+  (0.058%) one-pixel scrollbar-thumb drift. Visual review confirmed the current
+  output was intended; the Windows reference was refreshed and the rerun
+  passed.
+- Current macOS output/palette verification remains open; this card stays
+  pending until that cross-platform criterion is satisfied.

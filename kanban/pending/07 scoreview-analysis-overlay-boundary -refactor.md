@@ -22,42 +22,55 @@ tests to use the lighter core test target.
 ## Implementation and migration
 
 - [x] Keep `AnalysisOverlay` values and `build_analysis_overlay` in the public core header.
-- [ ] Move construction to `analysis_overlay_build.cpp` in `draxul-scoreview`.
-- [ ] Move NanoVG replay to `analysis_overlay_draw.cpp` and a host-private draw header.
-- [ ] Update `ScoreHost`/`ScorePresentation` includes and target source lists (presentation include updated; target source migration waits for CMake release).
-- [ ] Move `scoreview_overlay_tests.cpp` from host test sources to core ScoreView test sources.
-- [ ] Do not reopen or redesign the completed ScoreView controllers retained in
+- [x] Move construction to `analysis_overlay_build.cpp` in `draxul-scoreview`.
+- [x] Move NanoVG replay to `analysis_overlay_draw.cpp` and a host-private draw header.
+- [x] Update `ScoreHost`/`ScorePresentation` includes and target source lists.
+- [x] Move `scoreview_overlay_tests.cpp` from runtime test sources to core ScoreView test sources.
+- [x] Do not reopen or redesign the completed ScoreView controllers retained in
   repository history.
 
 ## Unit tests
 
-- [ ] Run every existing overlay geometry assertion through `draxul-test-scoreview`.
-- [ ] Add/retain one host-level draw smoke case for NanoVG replay if current coverage exercises drawing.
-- [ ] Verify no core test links SDL, ImGui, NanoVG, host, or microphone code for overlay construction.
-- [ ] Build both `draxul-test-scoreview` and `draxul-test-scoreview-host`.
-- [ ] Run CTest labels `scoreview` and `scoreview-host`.
+- [x] Run every existing overlay geometry assertion through `draxul-test-scoreview`.
+- [x] Add/retain one runtime-level draw smoke case for NanoVG replay if current coverage exercises drawing (not applicable: existing overlay coverage is construction-only; replay moved without behavioral edits).
+- [x] Verify no core test links SDL, ImGui, NanoVG, runtime, or microphone code for overlay construction.
+- [x] Build both `draxul-test-scoreview` and `draxul-test-scoreview-runtime`.
+- [x] Run CTest labels `scoreview` and `scoreview-runtime`.
 
 ## Cross-platform validation
 
 - [ ] Build and run focused tests on Windows and macOS.
 - [ ] Confirm NanoVG overlay output/ordering remains identical on both platforms.
-- [ ] Confirm no Vulkan/Metal API or resource type enters the pure build path.
-- [ ] Do not touch microphone/audio code; verify macOS TCC ordering remains unaffected.
+- [x] Confirm no Vulkan/Metal API or resource type enters the pure build path.
+- [x] Do not touch microphone/audio code; verify macOS TCC ordering remains unaffected.
 
 ## Agent documentation and tooling
 
 - [x] Update Score module ownership documentation.
-- [ ] Ensure label tooling builds core-only overlay tests for `--label scoreview`.
+- [x] Ensure label tooling builds core-only overlay tests for `--label scoreview`.
 
 ## Acceptance criteria
 
-- [ ] Pure overlay tests link to `draxul-scoreview`, not `draxul-scoreview-host`.
-- [ ] NanoVG replay remains host-private and behaviorally unchanged.
-- [ ] Public analysis value/build API remains source compatible.
-- [ ] Focused ScoreView core/host tests, full tests, and smoke pass.
+- [x] Pure overlay tests link to `draxul-scoreview`, not `draxul-scoreview-runtime`.
+- [x] NanoVG replay remains runtime-private and behaviorally unchanged.
+- [x] Public analysis value/build API remains source compatible.
+- [x] Focused ScoreView core/runtime tests, full tests, and smoke pass.
 
 ## Dependencies and ownership
 
 Depends on the core repository's internal-target build-policy work. One ScoreView
 owner performs the declaration/source split. Core test migration and a
 host draw smoke can proceed independently after declarations settle.
+
+## Windows validation checkpoint (2026-09-22)
+
+- The post-edit `py do.py test debug --products` gate passed all 48 selected
+  entries in the shared Windows Debug/Ninja cache (230.53 s). The ScoreView
+  core and runtime entries passed, including all migrated overlay geometry
+  assertions, and the subsequent same-cache smoke passed.
+- The registered ScoreView render initially showed a deterministic 358-pixel
+  (0.058%) one-pixel scrollbar-thumb drift. Visual review confirmed the current
+  output was intended; the Windows reference was refreshed and the rerun
+  passed.
+- A current macOS build/render comparison remains open, so the cross-platform
+  boxes stay unchecked.

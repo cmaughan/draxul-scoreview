@@ -158,10 +158,10 @@ When built inside Draxul, the test sources register into Draxul's ctest as two
 executables:
 
 - `draxul-test-scoreview` — the core suite: notation import, layout, interpreter,
-  flow/roll/gate judging, analysis, player model, stream program, metronome, MIDI,
-  and listener DSP tests.
+  flow/roll/gate judging, analysis, analysis-overlay geometry, keyboard layout,
+  player model, stream program, metronome, MIDI, and listener DSP tests.
 - `draxul-test-scoreview-runtime` — the runtime suite: composer, host
-  orchestration, window rebuild, microphone, overlay, and worker stress tests
+  orchestration, window rebuild, microphone, and worker stress tests
   (this executable hosts its own SDL).
 
 Run them from the Draxul build with
