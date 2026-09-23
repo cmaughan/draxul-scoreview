@@ -1,0 +1,109 @@
+name: Draxul compatibility
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Update this deliberately when ScoreView adopts a newer host SDK/support seam.
+  DRAXUL_REF: 3d8e565811f9ea3e2834fad348417cec3e3a4d91
+  VULKAN_SDK_VERSION: 1.4.357.0
+
+jobs:
+  focused-tests:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, macos-15]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Check out ScoreView
+        uses: actions/checkout@v4
+        with:
+          path: product
+          persist-credentials: false
+
+      - name: Check out pinned Draxul
+        uses: actions/checkout@v4
+        with:
+          repository: cmaughan/draxul
+          ref: ${{ env.DRAXUL_REF }}
+          path: draxul
+          submodules: false
+          persist-credentials: false
+
+      - name: Install Vulkan SDK
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $url = "https://sdk.lunarg.com/sdk/download/${env:VULKAN_SDK_VERSION}/windows/vulkan_sdk.exe"
+          curl.exe -f -L $url -o VulkanSDK.exe
+          .\VulkanSDK.exe --root "C:\VulkanSDK\${env:VULKAN_SDK_VERSION}" --accept-licenses --default-answer --confirm-command install
+          if (-not (Test-Path "$env:WINDIR\System32\vulkan-1.dll")) {
+            throw "The Vulkan SDK installer did not install the 64-bit Vulkan loader."
+          }
+          "VULKAN_SDK=C:\VulkanSDK\${env:VULKAN_SDK_VERSION}" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "C:\VulkanSDK\${env:VULKAN_SDK_VERSION}\Bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Install Metal toolchain
+        if: runner.os == 'macOS'
+        run: |
+          xcodebuild -downloadComponent MetalToolchain
+          xcrun --find metal
+
+      - name: Configure Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          cmake -S draxul -B build -G "Visual Studio 17 2022" -A x64
+          -DBUILD_TESTING=ON
+          -DDRAXUL_ENABLE_RENDER_TESTS=OFF
+          -DDRAXUL_REQUIRE_ENABLED_PLUGINS=ON
+          -DDRAXUL_ENABLE_MEGACITY=OFF
+          -DDRAXUL_ENABLE_SATVIEW=OFF
+          -DDRAXUL_ENABLE_SCOREVIEW=ON
+          -DDRAXUL_ENABLE_PCBVIEW=OFF
+          -DDRAXUL_ENABLE_REZONALITY=OFF
+          -DDRAXUL_SCOREVIEW_PLUGIN_DIR="${{ github.workspace }}/product"
+
+      - name: Configure macOS
+        if: runner.os == 'macOS'
+        run: >-
+          cmake -S draxul -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+          -DBUILD_TESTING=ON
+          -DDRAXUL_ENABLE_RENDER_TESTS=OFF
+          -DDRAXUL_REQUIRE_ENABLED_PLUGINS=ON
+          -DDRAXUL_ENABLE_MEGACITY=OFF
+          -DDRAXUL_ENABLE_SATVIEW=OFF
+          -DDRAXUL_ENABLE_SCOREVIEW=ON
+          -DDRAXUL_ENABLE_PCBVIEW=OFF
+          -DDRAXUL_ENABLE_REZONALITY=OFF
+          -DDRAXUL_SCOREVIEW_PLUGIN_DIR="${{ github.workspace }}/product"
+
+      - name: Build ScoreView and its focused tests
+        run: >-
+          cmake --build build --config Debug --parallel 4 --target
+          draxul-scoreview-plugin
+          draxul-test-scoreview
+          draxul-test-scoreview-runtime
+
+      - name: Verify focused test discovery
+        run: >-
+          python -c "import json, subprocess;
+          p = subprocess.run(['ctest', '--test-dir', 'build', '-C', 'Debug', '-L', '^scoreview$', '--show-only=json-v1'], check=True, capture_output=True, text=True);
+          tests = json.loads(p.stdout).get('tests', []);
+          assert len(tests) == 3, 'expected 3 ScoreView tests, discovered %d: %s' % (len(tests), [test.get('name') for test in tests]);
+          print('Discovered all 3 ScoreView tests')"
+
+      - name: Run focused ScoreView tests
+        run: ctest --test-dir build -C Debug -L "^scoreview$" --no-tests=error --output-on-failure --parallel 4
+
+      - name: Run copied-tree extraction smoke
+        run: cmake --build build --config Debug --target draxul-scoreview-extraction-smoke --parallel 4

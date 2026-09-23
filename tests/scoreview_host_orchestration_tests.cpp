@@ -284,6 +284,26 @@ TEST_CASE("input selection swaps in place and reports requested-vs-engaged",
     CHECK(ScoreHostTestAccess::playing(primed.host));
 }
 
+TEST_CASE("the host applies the earned tempo ladder cap unless tempo is locked",
+    "[scoreview][host][orchestration][tempo-ladder]")
+{
+    PrimedHost primed;
+    REQUIRE(primed.prime());
+
+    // A new bar starts at the model's 60% ladder rung. The host glue must
+    // translate that fraction into a cap against the piece marking.
+    ScoreHostTestAccess::apply_tempo_ladder_at(
+        primed.host, /*position_q=*/0.0, /*marking_qpm=*/120.0,
+        /*tempo_qpm=*/120.0, /*lock_tempo=*/false);
+    CHECK(ScoreHostTestAccess::tempo_qpm(primed.host) == Catch::Approx(72.0));
+
+    // The user's explicit lock always wins over the adaptive model.
+    ScoreHostTestAccess::apply_tempo_ladder_at(
+        primed.host, /*position_q=*/0.0, /*marking_qpm=*/120.0,
+        /*tempo_qpm=*/120.0, /*lock_tempo=*/true);
+    CHECK(ScoreHostTestAccess::tempo_qpm(primed.host) == Catch::Approx(120.0));
+}
+
 TEST_CASE("process device leases reject contention and release deterministically",
     "[scoreview][host][orchestration][devices]")
 {

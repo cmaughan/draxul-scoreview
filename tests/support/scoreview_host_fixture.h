@@ -138,6 +138,20 @@ public:
         return host.flow_.tempo_qpm();
     }
 
+    static void apply_tempo_ladder_at(ScoreHost& host, double position_q,
+        double marking_qpm, double tempo_qpm, bool lock_tempo)
+    {
+        host.stream_->set_active(true);
+        host.stream_->set_composing(false);
+        host.flow_.set_mode(FlowController::TransportMode::Roll);
+        host.flow_.set_marking_qpm(marking_qpm);
+        host.flow_.set_tempo_qpm(tempo_qpm);
+        host.flow_.seek(position_q);
+        host.lock_tempo_ = lock_tempo;
+        host.ladder_bar_ = -1;
+        host.apply_tempo_ladder();
+    }
+
     static bool playing(const ScoreHost& host)
     {
         return host.flow_.playing();
