@@ -6,7 +6,7 @@
 #include <draxul/imgui_input_bridge.h>
 #include <draxul/log.h>
 #include <draxul/notation/musicxml_importer.h>
-#include <draxul/scoreview/keyboard_render_nvg.h>
+#include <draxul/scoreview/keyboard_layout.h>
 #include <draxul/scoreview/piece_analysis.h>
 #include <draxul/scoreview/progress_store.h>
 #include <draxul/scoreview/score_render_nvg.h>
@@ -91,7 +91,8 @@ bool ScoreRuntime::initialize(const PluginRuntimeContext& context,
     device_leases_ = paths.device_leases
         ? std::move(paths.device_leases) : process_score_device_leases();
 
-    nanovg_pass_ = create_nanovg_pass();
+    nanovg_pass_ = plugin_support::create_plugin_nanovg_pass(
+        { .asset_root = std::move(paths.nanovg_assets) });
     if (!nanovg_pass_)
     {
         init_error_ = "failed to create NanoVG render pass";
@@ -344,9 +345,9 @@ void ScoreRuntime::set_presentation_visible(bool visible,
     else if (visible)
     {
         if (flow_.mode() != FlowController::TransportMode::Clock
-            && gate_input_requested_ != GateInput::Keyboard)
+            && !input_rig_.active())
         {
-            set_gate_input(gate_input_requested_, 0.0,
+            set_gate_input(gate_input_requested_, gate_bot_pace_qpm_,
                 gate_bot_accuracy_, midi_port_requested_);
         }
         if (resume_transport_on_show_ && !flow_.at_end())
@@ -1166,6 +1167,11 @@ bool ScoreRuntime::set_gate_input(
     GateInput input, double bot_pace_qpm, double bot_accuracy, int midi_port)
 {
     const GateInput requested = input;
+    if (input == GateInput::Bot)
+    {
+        gate_bot_pace_qpm_ = std::max(bot_pace_qpm, 1.0);
+        gate_bot_accuracy_ = std::clamp(bot_accuracy, 0.0, 1.0);
+    }
     release_input_device();
     device_error_.clear();
     if (input == GateInput::Mic || input == GateInput::Midi)
@@ -1206,8 +1212,8 @@ bool ScoreRuntime::set_gate_input(
         : input == GateInput::Mic            ? PlayerInputRig::Kind::Mic
         : input == GateInput::Midi           ? PlayerInputRig::Kind::Midi
                                              : PlayerInputRig::Kind::Keyboard;
-    selection.bot_pace_qpm = bot_pace_qpm;
-    selection.bot_accuracy = bot_accuracy;
+    selection.bot_pace_qpm = gate_bot_pace_qpm_;
+    selection.bot_accuracy = gate_bot_accuracy_;
     selection.midi_port = midi_port;
     const bool engaged = input_rig_.select(selection, flow_);
     if (!engaged && (selection.kind == PlayerInputRig::Kind::Mic
@@ -2207,7 +2213,10 @@ Color ScoreRuntime::default_background() const
 PluginRuntimeState ScoreRuntime::runtime_state() const
 {
     PluginRuntimeState state;
-    state.content_ready = running_ && (!engine_ || pages_ != nullptr);
+    const bool layout_ready = view_mode_ == ViewMode::Flow
+        ? strip_ != nullptr
+        : pages_ != nullptr;
+    state.content_ready = running_ && (!engine_ || layout_ready);
     return state;
 }
 

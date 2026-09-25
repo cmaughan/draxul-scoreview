@@ -109,11 +109,19 @@ When this repository is the top-level CMake source directory, the build sets
 `DRAXUL_SCOREVIEW_STANDALONE` and resolves the host side with
 `find_package(DraxulPluginSDK CONFIG REQUIRED)` — point `CMAKE_PREFIX_PATH` at a
 prefix where Draxul's `draxul-plugin-sdk` install component has been installed.
-Standalone builds also expect the copied `plugins/support/imgui` tree from Draxul
-at `../support/imgui` relative to this checkout, plus Draxul's
-`libs/draxul-imgui-core` copied to `../support/imgui-core` (the shared
-scancode/IImGuiHost leaf the support ImGui target consumes; the extraction smoke
-test stages both exactly this way).
+Standalone builds also expect Draxul's copied `plugins/support/imgui` and
+`plugins/support/nanovg` adapter trees at `../support/imgui` and
+`../support/nanovg-pass`, the copied `libs/draxul-nanovg` backend tree at
+`../support/nanovg`, and `libs/draxul-imgui-core` at
+`../support/imgui-core`. The extraction smoke stages this exact layout.
+
+The shared NanoVG adapter links the staged NanoVG backend and, on Vulkan, the
+standalone `draxul-scoreview-vma-impl` target. The adapter never supplies a
+second VMA implementation or retains SDK frame handles after rendering.
+Bundled macOS builds consume only `SDL3::Headers`, allowing the module to use
+the host executable's SDL symbols without registering a second set of SDL
+Objective-C classes. Standalone builds and Windows link `SDL3::SDL3` because
+they own their SDL runtime.
 
 The extraction smoke test, `tests/external_product_plugin_smoke.py`, proves this
 path end to end: it installs the SDK component from a Draxul build, copies this
@@ -137,9 +145,9 @@ smoke loop).
 | `product/draxul-score-learn` | Learning core: player model, piece analysis, source slicer, composer seam + adaptive stream, progress-file IO; a leaf library with purity enforced by the linker |
 | `product/draxul-score-input` | Player-input seam (`IPlayerInput`/`PlayerNoteEvent`), dev keyboard scaffold, hardware MIDI input; isolates RtMidi |
 | `product/draxul-score-audio` | Metronome/tone synths, soundfont voice, acoustic note listener; isolates TinySoundFont and KissFFT, offline-testable |
-| `product/draxul-score-canvas` | NanoVG canvas with the private Vulkan and Metal backends |
+| `product/draxul-score-canvas` | Product-owned NanoVG drawing composed through Draxul's shared SDK-frame adapter |
 | `product/draxul-score-runtime-support` | Shared runtime support: logging, SDL/ImGui input bridging |
-| `product/draxul-scoreview` | Layout/transport pipeline (Verovio wrapper, SVG interpreter, flow judge, bots) and the `draxul-scoreview-runtime` orchestration/presentation layer |
+| `product/draxul-scoreview` | Layout/transport pipeline (Verovio wrapper, SVG interpreter, flow judge, bots) with renderer-free `keyboard_layout.h` and analysis-overlay geometry; the `draxul-scoreview-runtime` layer owns NanoVG replay and presentation |
 | `tests/` | Unit/contract test sources, fixtures, and the extraction smoke script |
 | `docs/scoreview.md` | The owned feature page — the full product narrative |
 | `plans/` | Design docs: the manifesto, phase plans, runner/stream/composer/ear designs, learning research |
@@ -150,10 +158,10 @@ When built inside Draxul, the test sources register into Draxul's ctest as two
 executables:
 
 - `draxul-test-scoreview` — the core suite: notation import, layout, interpreter,
-  flow/roll/gate judging, analysis, player model, stream program, metronome, MIDI,
-  and listener DSP tests.
+  flow/roll/gate judging, analysis, analysis-overlay geometry, keyboard layout,
+  player model, stream program, metronome, MIDI, and listener DSP tests.
 - `draxul-test-scoreview-runtime` — the runtime suite: composer, host
-  orchestration, window rebuild, microphone, overlay, and worker stress tests
+  orchestration, window rebuild, microphone, and worker stress tests
   (this executable hosts its own SDL).
 
 Run them from the Draxul build with

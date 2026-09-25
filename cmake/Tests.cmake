@@ -14,7 +14,6 @@ set(_scoreview_runtime_test_sources
     "${_scoreview_root}/tests/scoreview_host_orchestration_tests.cpp"
     "${_scoreview_root}/tests/scoreview_host_rebuild_tests.cpp"
     "${_scoreview_root}/tests/scoreview_microphone_tests.cpp"
-    "${_scoreview_root}/tests/scoreview_overlay_tests.cpp"
     "${_scoreview_root}/tests/scoreview_worker_stress_tests.cpp")
 list(REMOVE_ITEM _scoreview_test_sources ${_scoreview_runtime_test_sources})
 

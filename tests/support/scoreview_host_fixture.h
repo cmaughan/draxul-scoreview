@@ -138,23 +138,67 @@ public:
         return host.flow_.tempo_qpm();
     }
 
+    static void apply_tempo_ladder_at(ScoreHost& host, double position_q,
+        double marking_qpm, double tempo_qpm, bool lock_tempo)
+    {
+        host.stream_->set_active(true);
+        host.stream_->set_composing(false);
+        host.flow_.set_mode(FlowController::TransportMode::Roll);
+        host.flow_.set_marking_qpm(marking_qpm);
+        host.flow_.set_tempo_qpm(tempo_qpm);
+        host.flow_.seek(position_q);
+        host.lock_tempo_ = lock_tempo;
+        host.ladder_bar_ = -1;
+        host.apply_tempo_ladder();
+    }
+
     static bool playing(const ScoreHost& host)
     {
         return host.flow_.playing();
     }
 
     // Input selection (kanban 15/16): the same swap-in-place path the UI
-    // uses. Mic is deliberately not offered here — it would touch the real
-    // permission/device layer; MicPlayerInput has its own fake-ops suite.
+    // uses. Tests requesting Mic must arrange a rejecting lease provider so
+    // they cannot reach the real permission/device layer; MicPlayerInput has
+    // its own fake-ops suite.
     static bool select_input(
         ScoreHost& host, GateInput input, int midi_port = -1)
     {
+        host.gate_input_requested_ = input;
+        host.midi_port_requested_ = midi_port;
         return host.set_gate_input(input, 60.0, 1.0, midi_port);
     }
 
     static PlayerInputRig::Kind input_kind(const ScoreHost& host)
     {
         return host.input_rig_.kind();
+    }
+
+    static int miss_count(const ScoreHost& host)
+    {
+        return host.flow_.miss_count();
+    }
+
+    static double bot_pace_qpm(const ScoreHost& host)
+    {
+        return host.gate_bot_pace_qpm_;
+    }
+
+    static void set_device_lease_provider(ScoreHost& host,
+        std::shared_ptr<IScoreDeviceLeaseProvider> provider)
+    {
+        host.device_leases_ = std::move(provider);
+    }
+
+    static bool acquire_input_lease(ScoreHost& host,
+        std::shared_ptr<IScoreDeviceLeaseProvider> provider,
+        ScoreDeviceKind kind, std::string_view device_name)
+    {
+        host.device_leases_ = std::move(provider);
+        auto acquired = host.device_leases_->acquire(
+            kind, device_name, &host);
+        host.input_lease_ = std::move(acquired.lease);
+        return host.input_lease_ != nullptr;
     }
 
     static void relayout_paged(ScoreHost& host, int width = 800, int height = 600)
@@ -247,7 +291,7 @@ inline bool wait_for_host_install(ScoreHost& host)
 
 // Counting IHostCallbacks: proves the host requests frames (and nothing
 // else) without a window; lifetime is the test's, so use-after-shutdown
-// would trip sanitizers.
+// would be an invalid lifetime access.
 class CountingHostCallbacks final : public ScoreRuntimeCallbacks
 {
 public:

@@ -4,6 +4,7 @@
 # judge, audio synths, device inputs); draxul-scoreview-runtime is the
 # plugin-owned orchestration and NanoVG presentation layer.
 add_library(draxul-scoreview STATIC
+    src/analysis_overlay_build.cpp
     src/bot_player_input.cpp
     src/engraved_window.cpp
     src/flow_controller.cpp
@@ -53,7 +54,7 @@ target_link_libraries(draxul-scoreview
 )
 
 add_library(draxul-scoreview-runtime STATIC
-    src/analysis_overlay.cpp
+    src/analysis_overlay_draw.cpp
     src/keyboard_render_nvg.cpp
     src/mic_player_input.cpp
     src/score_audio_controller.cpp

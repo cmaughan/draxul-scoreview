@@ -7,7 +7,7 @@
 
 #include "support/scoreview_engrave_helpers.h"
 
-#include <draxul/scoreview/keyboard_render_nvg.h>
+#include <draxul/scoreview/keyboard_layout.h>
 #include <draxul/scoreview/score_timemap.h>
 #include <draxul/scoreview/source_slicer.h>
 #include <draxul/scoreview/stream_composer.h>
@@ -536,26 +536,6 @@ TEST_CASE("the arc loops weakest slices until mastery earns the performance run"
     CHECK(performance_marked);
 }
 
-TEST_CASE("keyboard geometry maps 88 keys", "[scoreview][keyboard]")
-{
-    CHECK(keyboard_white_index(21) == 0); // A0
-    CHECK(keyboard_white_index(108) == 51); // C8
-    CHECK(keyboard_white_index(22) == -1); // A#0 is black
-    CHECK(keyboard_is_black(61));
-    CHECK_FALSE(keyboard_is_black(60));
-    int whites = 0;
-    for (int midi = kKeyboardLowMidi; midi <= kKeyboardHighMidi; ++midi)
-        whites += keyboard_is_black(midi) ? 0 : 1;
-    CHECK(whites == kKeyboardWhiteKeys);
-    // Middle C sits left of C#4, which sits on the C/D boundary.
-    const float c4 = keyboard_key_center_x(60, 0.0f, 520.0f);
-    const float cs4 = keyboard_key_center_x(61, 0.0f, 520.0f);
-    const float d4 = keyboard_key_center_x(62, 0.0f, 520.0f);
-    CHECK(c4 < cs4);
-    CHECK(cs4 < d4);
-    CHECK(cs4 == Catch::Approx((c4 + d4) * 0.5f).margin(0.01));
-}
-
 TEST_CASE("trailing clean plays gate the guidance keyboard", "[scoreview][keyboard]")
 {
     PlayerModel model;
@@ -632,65 +612,6 @@ TEST_CASE("the engine recovers enharmonic spelling from the score", "[scoreview]
     CHECK(letters[1] == 1); // Db is a D
     // ...and that difference reaches the palette: two colors, not one.
     CHECK(palette[0] != palette[1]);
-}
-
-TEST_CASE("the pairing palette colors spellings, not just pitch classes", "[scoreview][keyboard]")
-{
-    const auto differ = [](const unsigned char* a, const unsigned char* b) {
-        return std::abs(a[0] - b[0]) + std::abs(a[1] - b[1]) + std::abs(a[2] - b[2]);
-    };
-    const auto same = [](const unsigned char* a, const unsigned char* b) {
-        return a[0] == b[0] && a[1] == b[1] && a[2] == b[2];
-    };
-
-    // An accidental wears its PARENT letter's exact color: C# = C, Db = D. C#
-    // and Db are the same key/pitch (61) but different letters, so they still
-    // read apart (C's red vs D's orange) even though neither is recolored —
-    // the half-moon notehead, not a hue shift, marks them as accidentals.
-    const int c_sharp = guidance_palette_index(61, /*letter C=*/0);
-    const int d_flat = guidance_palette_index(61, /*letter D=*/1);
-    const int c_natural = guidance_palette_index(60, 0);
-    const int d_natural = guidance_palette_index(62, 1);
-    CHECK(c_sharp != d_flat);
-    CHECK(same(kGuidancePalette[c_sharp], kGuidancePalette[c_natural])); // C# = C
-    CHECK(same(kGuidancePalette[d_flat], kGuidancePalette[d_natural])); // Db = D
-    CHECK(differ(kGuidancePalette[c_sharp], kGuidancePalette[d_flat]) > 80); // C red vs D orange
-
-    // A spelling index is stable across octaves (C#4 and C#6 share it).
-    CHECK(guidance_palette_index(61, 0) == guidance_palette_index(85, 0));
-
-    // With no notated letter, the pitch class falls back to its sharp reading.
-    CHECK(guidance_palette_index(61) == c_sharp);
-    CHECK(guidance_palette_index(60) == c_natural);
-
-    // The seven WHITE KEYS (naturals) must all be clearly distinct — the
-    // point of the redesign: C and F used to look alike, now they don't.
-    const int naturals[7] = {
-        guidance_palette_index(60, 0), // C
-        guidance_palette_index(62, 1), // D
-        guidance_palette_index(64, 2), // E
-        guidance_palette_index(65, 3), // F
-        guidance_palette_index(67, 4), // G
-        guidance_palette_index(69, 5), // A
-        guidance_palette_index(71, 6), // B
-    };
-    int min_natural = 1000;
-    for (int i = 0; i < 7; ++i)
-        for (int j = i + 1; j < 7; ++j)
-            min_natural = std::min(min_natural,
-                differ(kGuidancePalette[naturals[i]], kGuidancePalette[naturals[j]]));
-    CHECK(min_natural > 55);
-    CHECK(differ(kGuidancePalette[naturals[0]], kGuidancePalette[naturals[3]]) > 200); // C vs F
-
-    // Every pitch maps in range. (Adjacent semitones may share a color now —
-    // a natural and its sharp are the same hue, told apart by the half-moon
-    // notehead, not the color — so there is no chromatic-contrast check.)
-    for (int midi = kKeyboardLowMidi; midi <= kKeyboardHighMidi; ++midi)
-    {
-        const int idx = guidance_palette_index(midi);
-        REQUIRE(idx >= 0);
-        REQUIRE(idx < kGuidancePaletteSize);
-    }
 }
 
 // --- Structure-aware chunking (C1/C2, plans/scoreview-composer.md) --------

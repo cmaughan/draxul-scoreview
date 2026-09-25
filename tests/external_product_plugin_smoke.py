@@ -83,6 +83,8 @@ def main() -> int:
         # its backend half from a copy staged beside support/imgui.
         shutil.copytree(source_root / "libs" / "draxul-nanovg",
                         copied_plugins / "support" / "nanovg")
+        shutil.copytree(source_root / "plugins" / "support" / "nanovg",
+                        copied_plugins / "support" / "nanovg-pass")
 
         forbidden_roots = [temp / name for name in ("app", "libs", "modules")]
         if any(path.exists() for path in forbidden_roots):

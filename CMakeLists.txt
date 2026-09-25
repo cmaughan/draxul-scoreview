@@ -90,10 +90,31 @@ if(DRAXUL_SCOREVIEW_STANDALONE)
             Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator)
         set(DRAXUL_SCOREVIEW_VULKAN_RESOURCES_TARGET draxul-scoreview-vma-impl)
     endif()
+    set(DRAXUL_PLUGIN_NANOVG_BACKEND_TARGET
+        ${DRAXUL_SCOREVIEW_NANOVG_TARGET})
+    if(NOT APPLE)
+        set(DRAXUL_PLUGIN_NANOVG_VULKAN_RESOURCES_TARGET
+            ${DRAXUL_SCOREVIEW_VULKAN_RESOURCES_TARGET})
+    endif()
+    if(NOT TARGET draxul-plugin-nanovg-support)
+        if(NOT EXISTS
+            "${CMAKE_CURRENT_SOURCE_DIR}/../support/nanovg-pass/CMakeLists.txt")
+            message(FATAL_ERROR
+                "ScoreView standalone builds require the copied "
+                "plugins/support/nanovg tree beside this directory as "
+                "support/nanovg-pass.")
+        endif()
+        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../support/nanovg-pass"
+            "${CMAKE_CURRENT_BINARY_DIR}/plugin-nanovg-pass")
+    endif()
+    set(DRAXUL_SCOREVIEW_NANOVG_PASS_TARGET
+        draxul-plugin-nanovg-support)
 else()
     set(DRAXUL_SCOREVIEW_IMGUI_TARGET Draxul::PluginSupport::ImGui)
     set(DRAXUL_SCOREVIEW_TYPES_TARGET Draxul::PluginSupport::Types)
     set(DRAXUL_SCOREVIEW_NANOVG_TARGET Draxul::PluginSupport::NanoVG)
+    set(DRAXUL_SCOREVIEW_NANOVG_PASS_TARGET
+        Draxul::PluginSupport::NanoVGPass)
     if(NOT APPLE)
         set(DRAXUL_SCOREVIEW_VULKAN_RESOURCES_TARGET
             Draxul::PluginSupport::VulkanResources)
@@ -210,9 +231,7 @@ if(NOT DRAXUL_SCOREVIEW_STANDALONE)
         if(_scoreview_target_type STREQUAL "INTERFACE_LIBRARY")
             continue()
         endif()
-        if(COMMAND draxul_apply_sanitizers)
-            draxul_apply_sanitizers(${_target})
-            draxul_apply_coverage(${_target})
+        if(COMMAND draxul_apply_msvc_parallel_pdb_fix)
             draxul_apply_msvc_parallel_pdb_fix(${_target})
         endif()
     endforeach()

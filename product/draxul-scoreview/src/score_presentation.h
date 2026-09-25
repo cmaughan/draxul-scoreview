@@ -8,7 +8,7 @@
 // host builds a plain input each frame and this component records it.
 // Internal to draxul-scoreview-runtime (no public header).
 
-#include <draxul/nanovg_pass.h>
+#include <draxul/plugin_nanovg_pass.h>
 #include <draxul/scoreview/analysis_overlay.h>
 #include <draxul/scoreview/engraved_window.h>
 #include <draxul/scoreview/flow_controller.h>
@@ -62,17 +62,17 @@ public:
         const PlayerModel* model = nullptr;
     };
 
-    void record_flow(INanoVGPass& pass, const FlowFrame& frame);
+    void record_flow(plugin_support::IPluginNanoVGPass& pass, const FlowFrame& frame);
     void set_music_font_path(std::string path)
     {
         music_font_path_ = std::move(path);
     }
-    void record_placeholder(INanoVGPass& pass, float pixel_scale);
+    void record_placeholder(plugin_support::IPluginNanoVGPass& pass, float pixel_scale);
     // `overlay` (optional): the analysis data — pages parallel to `pages`.
     // `annotations` draws the green analysis marks + banner; `unique_chunks`
     // ghosts restated phrases under a paper wash ('s', the piece's actual
     // size). Either flag alone works; the overlay is ignored when both off.
-    void record_paged(INanoVGPass& pass,
+    void record_paged(plugin_support::IPluginNanoVGPass& pass,
         std::shared_ptr<const std::vector<ScoreDrawList>> pages, float pixel_scale,
         float margin, float gap, float scroll, float page_w, float page_h, float scale,
         std::shared_ptr<const AnalysisOverlay> overlay = nullptr,

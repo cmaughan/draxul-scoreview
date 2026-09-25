@@ -266,6 +266,22 @@ std::string SourceSlicer::window_xml_for(
     // multi-part sources stay verbatim-only.
     if (has_fabricated && impl_->parts.size() != 1)
         return {};
+    // The first part defines the score's public bar count, but MusicXML also
+    // permits a later part to end early. Validate the requested source bar
+    // and the state lookup for every part before cloning anything: a partial
+    // document is less useful than a controlled empty result, and indexing a
+    // short part here used to be out of bounds.
+    for (const Impl::Part& part : impl_->parts)
+    {
+        if (part.state_before.empty())
+            return {};
+        for (const StreamBar& bar : bars)
+        {
+            if (bar.source_bar >= 0
+                && static_cast<size_t>(bar.source_bar) >= part.measures.size())
+                return {};
+        }
+    }
     context_bar = std::clamp(context_bar, 0, bar_count() - 1);
 
     std::string out;
@@ -311,6 +327,8 @@ std::string SourceSlicer::window_xml_for(
                     ? static_cast<size_t>(item.source_bar)
                     : std::min(static_cast<size_t>(context_bar) + 1,
                           part.state_before.size() - 1);
+                if (state_index >= part.state_before.size())
+                    return {};
                 const AttributeState& state = part.state_before[state_index];
 
                 // Gap-fill only: when the head measure ITSELF re-declares an

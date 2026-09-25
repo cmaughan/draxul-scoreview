@@ -1,4 +1,4 @@
-#include <draxul/nanovg_pass.h>
+#include <draxul/plugin_nanovg_pass.h>
 #include <draxul/plugin_adapter.h>
 #include <draxul/plugin_api.h>
 #include <draxul/plugin_gpu_imgui.h>
@@ -61,7 +61,7 @@ public:
         : instance_(instance), vulkan_(vulkan), metal_(metal)
     {
     }
-    void record_canvas(draxul::INanoVGPass& pass,
+    void record_canvas(draxul::plugin_support::IPluginNanoVGPass& pass,
         int, int, int, int) override;
     void render_overlay(void* draw_data, void* context) override;
     void finish() override {}
@@ -98,7 +98,8 @@ void FrameSink::render_overlay(void* draw_data, void* context)
             static_cast<ImGuiContext*>(context)) && ok_;
 }
 
-void FrameSink::record_canvas(draxul::INanoVGPass& pass,
+void FrameSink::record_canvas(
+    draxul::plugin_support::IPluginNanoVGPass& pass,
     int, int, int, int)
 {
     if (vulkan_)
@@ -181,13 +182,13 @@ void* create_instance(const DraxulPluginCreateInfoV2* info)
         info->initial_viewport.width, info->initial_viewport.height };
     context.initial_viewport.pixel_scale = info->initial_viewport.pixel_scale;
     draxul::scoreview::ScoreRuntimePaths paths;
+    paths.nanovg_assets = instance->directory;
     paths.verovio_data = instance->directory / "verovio-data";
     paths.soundfonts = instance->directory / "soundfonts";
     const std::string data = service_path(instance->paths,
         DRAXUL_PLUGIN_PATH_DATA);
     if (!data.empty())
         paths.progress = std::filesystem::u8path(data) / "progress";
-    draxul::set_nanovg_asset_root(instance->directory);
     instance->runtime = std::make_unique<draxul::scoreview::ScoreRuntime>();
     if (!instance->runtime->initialize(context, instance->callbacks,
             std::move(paths), mode))
