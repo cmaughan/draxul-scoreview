@@ -128,7 +128,9 @@ public:
     void seek(double qstamp);
     // Advances by wall-clock time at the current tempo; no-op while paused.
     // Auto-pauses when the end of the piece is reached.
-    void advance(double wall_dt_seconds);
+    void advance(double wall_dt_seconds, bool defer_roll_expiration = false);
+    // Used by the runtime after it has judged all timestamped input in a pump.
+    void expire_roll();
     double position_q() const
     {
         return position_q_;
@@ -214,6 +216,10 @@ public:
     // mode: an event hits the nearest onset within the timing window that
     // still needs its pitch; matching nothing counts as a wrong note.
     void judge(const std::vector<PlayerNoteEvent>& events);
+    // Roll input can arrive between pumps; judge against its event-time
+    // transport position, not the later position when the queue is drained.
+    void judge_at(const std::vector<PlayerNoteEvent>& events,
+        const std::vector<double>& event_positions_q);
 
     // Roll diagnostics: rolling per-note accuracy EMA and stray-note count.
     double accuracy_ema() const
@@ -333,7 +339,8 @@ private:
     void advance_armed();
     double next_required_qstamp() const;
     // Roll internals --------------------------------------------------------
-    void judge_roll(const std::vector<PlayerNoteEvent>& events);
+    void judge_roll(const std::vector<PlayerNoteEvent>& events,
+        const std::vector<double>* event_positions_q = nullptr);
     void resolve_roll_passed();
     void accuracy_sample(double value);
     void adjust_roll_tempo();

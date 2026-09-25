@@ -48,6 +48,11 @@ public:
         return profile_;
     }
     void set_piece_profile(PieceProfile profile);
+    void ensure_piece_profile_dump();
+    int analysis_dump_write_count() const
+    {
+        return analysis_dump_write_count_;
+    }
 
     // Session clock. begin_session stamps now and returns whether a fresh
     // session actually started (false when unattached or already active);
@@ -74,6 +79,7 @@ private:
     std::chrono::steady_clock::time_point session_start_{};
     int last_flush_bar_ = -1;
     bool dirty_ = false;
+    int analysis_dump_write_count_ = 0;
 };
 
 } // namespace scoreview

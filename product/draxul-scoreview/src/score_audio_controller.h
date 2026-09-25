@@ -13,6 +13,8 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <optional>
+#include <string_view>
 #include <vector>
 
 struct SDL_AudioStream;
@@ -62,6 +64,7 @@ public:
     }
     void set_tick_level(TickLevel level);
     void cycle_tick_level();
+    static std::optional<TickLevel> tick_level_from_mode(std::string_view mode);
 
     // Audition: synthesized playback of notes as the playhead crosses them.
     bool audition() const

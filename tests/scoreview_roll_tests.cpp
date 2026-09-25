@@ -134,6 +134,31 @@ TEST_CASE("roll judges pitches inside the timing window", "[scoreview][roll]")
     CHECK(world.flow.miss_count() >= 2); // onsets 0 and 1 rolled past unplayed
 }
 
+TEST_CASE("roll uses timestamp-mapped event positions before expiration",
+    "[scoreview][roll]")
+{
+    RollWorld delayed = make_roll_world(3, { { "n1", 72 } });
+    delayed.flow.set_tempo_qpm(60.0);
+    delayed.flow.seek(1.43);
+    delayed.flow.advance(0.03, /*defer_roll_expiration=*/true);
+    CHECK(delayed.flow.position_q() == Catch::Approx(1.46));
+    delayed.flow.judge_at({ { 72, 1.44 } }, { 1.44 });
+    delayed.flow.expire_roll();
+    CHECK(verdict_of(delayed.flow, 1) == Verdict::Correct);
+    CHECK(delayed.flow.miss_count() == 1); // onset zero really expired
+
+    RollWorld late = make_roll_world(3, { { "n1", 72 } });
+    late.flow.set_tempo_qpm(60.0);
+    late.flow.seek(1.43);
+    late.flow.advance(0.03, /*defer_roll_expiration=*/true);
+    late.flow.judge_at({ { 72, 1.46 } }, { 1.46 });
+    late.flow.expire_roll();
+    CHECK(verdict_of(late.flow, 1) == Verdict::Pending); // grace only delays expiry
+    CHECK(late.flow.wrong_count() == 1);
+    late.flow.advance(0.11);
+    CHECK(verdict_of(late.flow, 1) == Verdict::Missed);
+}
+
 TEST_CASE("roll resolves chords per note", "[scoreview][roll]")
 {
     RollWorld world = make_roll_world(3, { { "c1", 64 } }, { { "n1", { "c1" } } });

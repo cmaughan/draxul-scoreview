@@ -164,6 +164,17 @@ bool SourceSlicer::load(const std::string& musicxml, std::string& error)
         error = "source holds no measures";
         return false;
     }
+    const size_t measure_count = impl_->parts.front().measures.size();
+    for (const Impl::Part& part : impl_->parts)
+    {
+        if (part.measures.size() != measure_count
+            || part.state_before.size() != part.measures.size())
+        {
+            error = "source parts have inconsistent measure counts";
+            impl_ = std::make_unique<Impl>();
+            return false;
+        }
+    }
 
     // Bar starts on the quarter axis from the notated time signatures.
     // (Implicit pickup bars would shift this — a recorded S2 limitation.)
@@ -208,7 +219,8 @@ bool SourceSlicer::load(const std::string& musicxml, std::string& error)
 
 std::string SourceSlicer::window_xml(int first_bar, int count) const
 {
-    if (!ready() || first_bar < 0 || count <= 0 || first_bar + count > bar_count())
+    if (!ready() || first_bar < 0 || count <= 0 || first_bar >= bar_count()
+        || count > bar_count() - first_bar)
         return {};
     std::vector<StreamBar> bars;
     bars.reserve(static_cast<size_t>(count));
@@ -266,11 +278,9 @@ std::string SourceSlicer::window_xml_for(
     // multi-part sources stay verbatim-only.
     if (has_fabricated && impl_->parts.size() != 1)
         return {};
-    // The first part defines the score's public bar count, but MusicXML also
-    // permits a later part to end early. Validate the requested source bar
-    // and the state lookup for every part before cloning anything: a partial
-    // document is less useful than a controlled empty result, and indexing a
-    // short part here used to be out of bounds.
+    // Validate the requested source bar and state lookup for every part before
+    // cloning anything, including if internal state is ever restored without
+    // passing through load().
     for (const Impl::Part& part : impl_->parts)
     {
         if (part.state_before.empty())
@@ -278,7 +288,8 @@ std::string SourceSlicer::window_xml_for(
         for (const StreamBar& bar : bars)
         {
             if (bar.source_bar >= 0
-                && static_cast<size_t>(bar.source_bar) >= part.measures.size())
+                && (static_cast<size_t>(bar.source_bar) >= part.measures.size()
+                    || static_cast<size_t>(bar.source_bar) >= part.state_before.size()))
                 return {};
         }
     }

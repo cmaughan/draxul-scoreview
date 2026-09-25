@@ -14,7 +14,10 @@
 #include <draxul/scoreview/score_runtime.h>
 
 #include "score_stream_controller.h"
+#include "score_session_controller.h"
 #include "score_view_model.h"
+
+#include <SDL3/SDL_keycode.h>
 
 #include <chrono>
 #include <condition_variable>
@@ -179,6 +182,11 @@ public:
         return host.flow_.miss_count();
     }
 
+    static int wrong_count(const ScoreHost& host)
+    {
+        return host.flow_.wrong_count();
+    }
+
     static double bot_pace_qpm(const ScoreHost& host)
     {
         return host.gate_bot_pace_qpm_;
@@ -254,9 +262,143 @@ public:
         return host.flow_.mode();
     }
 
+    static size_t paged_page_count(const ScoreHost& host)
+    {
+        return host.pages_ ? host.pages_->size() : 0;
+    }
+
+    static void clear_progress(ScoreHost& host)
+    {
+        host.clear_piece_progress();
+    }
+
+    static bool reload_source(ScoreHost& host)
+    {
+        std::string error;
+        return host.engine_->load(host.source_bytes_, error);
+    }
+
+    static void set_flow_intent(ScoreHost& host, FlowController::TransportMode mode)
+    {
+        host.game_mode_ = mode;
+    }
+
+    static FlowController::TransportMode launch_intent(std::string_view mode)
+    {
+        return ScoreHost::launch_transport_intent(mode);
+    }
+
+    static bool pending_performance_entry(const ScoreHost& host)
+    {
+        return host.start_in_gate_;
+    }
+
+    static bool paged(const ScoreHost& host)
+    {
+        return host.view_mode_ == ScoreHost::ViewMode::Paged;
+    }
+
+    static bool attach_progress_session(ScoreHost& host,
+        const std::filesystem::path& directory)
+    {
+        host.session_->attach_source(directory, host.source_bytes_);
+        host.begin_progress_session();
+        return host.session_->model().session_active();
+    }
+
+    static void attach_analysis_source(ScoreHost& host,
+        const std::filesystem::path& directory)
+    {
+        host.session_->attach_source(directory, host.source_bytes_);
+    }
+
+    static bool replace_analysis_source(ScoreHost& host,
+        std::string_view source, const std::filesystem::path& directory)
+    {
+        std::string error;
+        if (!host.engine_->load(source, error))
+            return false;
+        host.source_bytes_ = std::string(source);
+        host.session_->attach_source(directory, host.source_bytes_);
+        return true;
+    }
+
+    static int analysis_build_count(const ScoreHost& host)
+    {
+        return host.analysis_build_count_;
+    }
+
+    static int analysis_dump_write_count(const ScoreHost& host)
+    {
+        return host.session_->analysis_dump_write_count();
+    }
+
+    static bool session_active(const ScoreHost& host)
+    {
+        return host.session_->model().session_active();
+    }
+
+    static bool acquire_audio_lease(ScoreHost& host,
+        std::shared_ptr<IScoreDeviceLeaseProvider> provider)
+    {
+        host.device_leases_ = std::move(provider);
+        auto acquired = host.device_leases_->acquire(
+            ScoreDeviceKind::AudioOutput, "default", &host);
+        host.audio_lease_ = std::move(acquired.lease);
+        return host.audio_lease_ != nullptr;
+    }
+
     static bool stream_active(const ScoreHost& host)
     {
         return host.stream_active();
+    }
+
+    static bool stream_windowed(const ScoreHost& host)
+    {
+        return host.stream_->windowed();
+    }
+
+    static void disable_windowing(ScoreHost& host)
+    {
+        host.stream_->set_windowed(false);
+        host.stream_->set_active(false);
+    }
+
+    static bool rewind_clears_roll_history(ScoreHost& host)
+    {
+        host.roll_timeline_.push_back({ 1.0, 2.0, 0.0, 1.0 });
+        host.on_key({ 0, SDLK_R, {}, true });
+        return host.roll_timeline_.empty();
+    }
+
+    static bool fallback_pending(const ScoreHost& host)
+    {
+        return host.window_fallback_pending_;
+    }
+
+    static void fail_async_advance(ScoreHost& host)
+    {
+        WindowEngraver::Done done;
+        done.ok = false;
+        host.apply_completed_engrave(std::move(done), 0.0,
+            /*carry=*/true, /*preserve_tempo=*/false,
+            /*fallback_to_monolith=*/true);
+    }
+
+    static void pump_roll_event(ScoreHost& host, double event_at_seconds,
+        double pump_at_seconds, double elapsed_seconds, int pitch)
+    {
+        const auto now = std::chrono::steady_clock::now();
+        host.epoch_ = now - std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+            std::chrono::duration<double>(pump_at_seconds));
+        host.last_pump_ = now - std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+            std::chrono::duration<double>(elapsed_seconds));
+        host.flow_.seek(pump_at_seconds - elapsed_seconds);
+        host.flow_.set_tempo_qpm(60.0);
+        host.flow_.play();
+        host.set_gate_input(GateInput::Keyboard, 60.0, 1.0);
+        host.input_rig_.feed_keyboard_note(pitch, event_at_seconds);
+        host.pump();
     }
 
     static size_t waterfall_note_count(const ScoreHost& host)

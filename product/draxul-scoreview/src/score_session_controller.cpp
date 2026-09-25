@@ -62,15 +62,24 @@ void ScoreSessionController::set_piece_profile(PieceProfile profile)
         key_name(profile_.global_key.tonic_pc, profile_.global_key.minor).c_str(),
         profile_.global_key.confidence, profile_.chords.size(), profile_.motifs.size(),
         profile_.figures.size());
-    if (!progress_path_.empty())
-    {
-        std::filesystem::path analysis_path = progress_path_;
-        analysis_path.replace_extension(".analysis.json");
-        std::string save_error;
-        if (!save_progress_atomic(analysis_path, profile_.serialize(), save_error))
-            DRAXUL_LOG_WARN(
-                LogCategory::App, "score: analysis dump failed: %s", save_error.c_str());
-    }
+    ensure_piece_profile_dump();
+}
+
+void ScoreSessionController::ensure_piece_profile_dump()
+{
+    if (progress_path_.empty())
+        return;
+    std::filesystem::path analysis_path = progress_path_;
+    analysis_path.replace_extension(".analysis.json");
+    const std::string serialized = profile_.serialize();
+    if (load_progress(analysis_path) == serialized)
+        return;
+    std::string save_error;
+    if (save_progress_atomic(analysis_path, serialized, save_error))
+        ++analysis_dump_write_count_;
+    else
+        DRAXUL_LOG_WARN(
+            LogCategory::App, "score: analysis dump failed: %s", save_error.c_str());
 }
 
 bool ScoreSessionController::begin_session()

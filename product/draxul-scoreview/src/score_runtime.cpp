@@ -81,10 +81,24 @@ bool ScoreRuntime::stream_active() const
 
 ScoreRuntime::~ScoreRuntime() = default;
 
+FlowController::TransportMode ScoreRuntime::launch_transport_intent(std::string_view mode)
+{
+    if (mode.find("paged") != std::string_view::npos)
+        return FlowController::TransportMode::Roll;
+    if (mode.find("gate") != std::string_view::npos)
+        return FlowController::TransportMode::Gate;
+    if (mode.find("flow") != std::string_view::npos)
+        return FlowController::TransportMode::Clock;
+    return FlowController::TransportMode::Roll;
+}
+
 bool ScoreRuntime::initialize(const PluginRuntimeContext& context,
     ScoreRuntimeCallbacks& callbacks, ScoreRuntimePaths paths, std::string mode)
 {
     quiesced_ = false;
+    analysis_cache_valid_ = false;
+    analysis_cached_source_.clear();
+    analysis_build_count_ = 0;
     viewport_ = context.initial_viewport;
     callbacks_ = &callbacks;
     source_path_ = context.launch_options.source_path;
@@ -188,7 +202,7 @@ bool ScoreRuntime::initialize(const PluginRuntimeContext& context,
         flow_dirty_ = true;
         start_in_gate_ = true;
         gate_input_requested_ = GateInput::Keyboard;
-        game_mode_ = FlowController::TransportMode::Roll;
+        game_mode_ = launch_transport_intent(mode);
         const std::string& command = mode;
         if (command.find("paged") != std::string::npos)
         {
@@ -198,7 +212,6 @@ bool ScoreRuntime::initialize(const PluginRuntimeContext& context,
         }
         else if (command.find("gate") != std::string::npos)
         {
-            game_mode_ = FlowController::TransportMode::Gate;
             if (command.find("bot") != std::string::npos)
                 gate_input_requested_ = GateInput::Bot;
             else if (command.find("mic") != std::string::npos)
@@ -221,8 +234,8 @@ bool ScoreRuntime::initialize(const PluginRuntimeContext& context,
             stream_->set_windowed(false);
         // The metronome defaults ON with subdivisions; `notick`/`tick`/
         // `tick8` tokens override from launch (dev/test).
-        if (command.find("notick") != std::string::npos)
-            audio_->set_tick_level(ScoreAudioController::TickLevel::Off);
+        if (const auto tick_level = ScoreAudioController::tick_level_from_mode(command))
+            audio_->set_tick_level(*tick_level);
         if (command.find("notes") != std::string::npos)
             audio_->set_audition(true);
         if (command.find("nowaterfall") != std::string::npos)
@@ -264,10 +277,6 @@ bool ScoreRuntime::initialize(const PluginRuntimeContext& context,
             composer_scales_ = true;
         if (command.find("locktempo") != std::string::npos)
             lock_tempo_ = true;
-        else if (command.find("tick8") != std::string::npos)
-            audio_->set_tick_level(ScoreAudioController::TickLevel::Eighths);
-        else if (command.find("tick") != std::string::npos)
-            audio_->set_tick_level(ScoreAudioController::TickLevel::Beats);
     }
 
     // The debug/learning inspector gets its own ImGui context (the pattern
@@ -286,6 +295,23 @@ bool ScoreRuntime::initialize(const PluginRuntimeContext& context,
 double ScoreRuntime::now_seconds() const
 {
     return std::chrono::duration<double>(std::chrono::steady_clock::now() - epoch_).count();
+}
+
+std::optional<double> ScoreRuntime::event_position_q(double event_seconds) const
+{
+    if (roll_timeline_.empty() || event_seconds < roll_timeline_.front().start_seconds)
+        return std::nullopt;
+    for (const TransportSegment& segment : roll_timeline_)
+    {
+        if (event_seconds > segment.end_seconds)
+            continue;
+        const double span = segment.end_seconds - segment.start_seconds;
+        const double fraction = span > 0.0
+            ? std::clamp((event_seconds - segment.start_seconds) / span, 0.0, 1.0)
+            : 1.0;
+        return segment.start_q + (segment.end_q - segment.start_q) * fraction;
+    }
+    return roll_timeline_.back().end_q;
 }
 
 void ScoreRuntime::shutdown()
@@ -341,6 +367,7 @@ void ScoreRuntime::set_presentation_visible(bool visible,
             flow_.pause();
         release_input_device();
         release_audio_output();
+        roll_timeline_.clear();
     }
     else if (visible)
     {
@@ -525,11 +552,12 @@ void ScoreRuntime::relayout()
     // The paged (reading) view is always the WHOLE piece: if the engine is
     // currently holding a rolling-window slice (the Roll runner), reload the
     // full source first — otherwise pagination would show only the window.
-    if (stream_->active())
+    if (stream_->active() || engine_document_may_be_slice_)
     {
         std::string reload_error;
         if (engine_->load(source_bytes_, reload_error))
         {
+            engine_document_may_be_slice_ = false;
             stream_->set_active(false);
             stream_->clear_window_geometry();
         }
@@ -537,6 +565,9 @@ void ScoreRuntime::relayout()
         {
             DRAXUL_LOG_ERROR(LogCategory::App,
                 "score: source reload for paged view failed: %s", reload_error.c_str());
+            window_warning_ = "full-score reload failed: " + reload_error;
+            layout_dirty_ = false; // retain prior pages; avoid retry/logging every frame
+            return;
         }
     }
 
@@ -623,7 +654,7 @@ void ScoreRuntime::relayout_flow()
     flow_dirty_ = false;
     if (!engine_ || !engine_->is_loaded())
         return;
-    if (stream_->active())
+    if (stream_->active() || engine_document_may_be_slice_ || window_fallback_pending_)
     {
         // Leaving the windowed roll: the clock conveyor and paged view work
         // on the whole piece again.
@@ -632,14 +663,20 @@ void ScoreRuntime::relayout_flow()
         {
             DRAXUL_LOG_ERROR(LogCategory::App, "score: source reload failed: %s",
                 reload_error.c_str());
+            window_warning_ = "full-score reload failed: " + reload_error;
+            start_in_gate_ = false;
             return;
         }
-        stream_->set_active(false);
-        stream_->clear_window_geometry();
+        engine_document_may_be_slice_ = false;
+        if (!window_fallback_pending_)
+        {
+            stream_->set_active(false);
+            stream_->clear_window_geometry();
+        }
     }
 
     std::string error;
-    const FlowBuildResult result = build_flow_from_engine(error);
+    const FlowBuildResult result = build_flow_from_engine(error, window_fallback_pending_);
     // A fresh engraving: re-fit the fixed score band's scale to the new
     // content (the window high-water-mark restarts from the first window).
     presentation_->invalidate_scale_lock();
@@ -647,14 +684,37 @@ void ScoreRuntime::relayout_flow()
     {
         DRAXUL_LOG_ERROR(
             LogCategory::App, "score: flow interpret failed, staying paged: %s", error.c_str());
+        if (window_fallback_pending_)
+        {
+            window_warning_ = "full-score fallback failed: " + error;
+            start_in_gate_ = false;
+            return; // keep the last valid rolling strip visible
+        }
         view_mode_ = ViewMode::Paged;
+        start_in_gate_ = false;
         layout_dirty_ = true;
         return;
     }
     const bool transport_ok = result == FlowBuildResult::Ok;
     if (!transport_ok)
+    {
         DRAXUL_LOG_ERROR(
             LogCategory::App, "score: conveyor transport unavailable: %s", error.c_str());
+        start_in_gate_ = false;
+        if (window_fallback_pending_)
+        {
+            window_warning_ = "full-score fallback failed: " + error;
+            return;
+        }
+    }
+    if (window_fallback_pending_)
+    {
+        stream_->set_active(false);
+        stream_->clear_window_geometry();
+        stream_->set_windowed(false); // permanent until the source is reopened
+        window_fallback_pending_ = false;
+        window_warning_.clear();
+    }
 
     const double bar_quarters = quarters_per_measure_from_model();
     quarters_per_bar_ = bar_quarters > 0.0 ? bar_quarters : 4.0;
@@ -693,30 +753,11 @@ void ScoreRuntime::relayout_flow()
         // drill bars; unsupported pieces stream the source verbatim.
         stream_->set_composing(composer_enabled_ && stream_->windowed()
             && stream_->composer().supports(stream_->slicer()));
-        if (stream_->composing())
-        {
-            stream_->composer().set_drills_enabled(composer_drills_);
-            stream_->composer().set_scales_enabled(composer_scales_);
-            stream_->composer().configure(&stream_->slicer(), &session_->model(), &session_->piece_profile());
-            reset_stream_plan();
-        }
-
         // Piece analysis (stream plan S1): key, chords + nearings, motifs,
         // rhythm figures — from the judgment axis itself, dumped beside the
         // progress file for inspection and cached for the composer. Built
         // from the timemap so onsets carry DURATIONS (the sustain-aware
         // skyline needs them to keep accompaniment out of the melody).
-        std::vector<AnalysisOnset> analysis_onsets;
-        {
-            std::string timemap_error;
-            const auto analysis_timemap = parse_timemap(engine_->render_timemap(), timemap_error);
-            if (analysis_timemap)
-                analysis_onsets = analysis_onsets_from_timemap(*analysis_timemap,
-                    [this](const std::string& id) { return engine_->midi_pitch_for_element(id); });
-            else
-                DRAXUL_LOG_DEBUG(LogCategory::App, "score: analysis timemap failed: %s",
-                    timemap_error.c_str());
-        }
         std::optional<int> notated_fifths;
         if (has_model_ && !model_.parts.empty())
         {
@@ -729,11 +770,40 @@ void ScoreRuntime::relayout_flow()
                 }
             }
         }
-        session_->set_piece_profile(
-            analyze_piece(analysis_onsets, quarters_per_bar_, notated_fifths));
-        // A fresh analysis invalidates any overlay built against the old
-        // profile (the paged view may already be holding pages).
-        rebuild_analysis_overlay();
+        if (!analysis_cache_valid_ || analysis_cached_source_ != source_bytes_
+            || analysis_cached_quarters_per_bar_ != quarters_per_bar_
+            || analysis_cached_notated_fifths_ != notated_fifths)
+        {
+            std::vector<AnalysisOnset> analysis_onsets;
+            std::string timemap_error;
+            const auto analysis_timemap = parse_timemap(engine_->render_timemap(), timemap_error);
+            if (analysis_timemap)
+                analysis_onsets = analysis_onsets_from_timemap(*analysis_timemap,
+                    [this](const std::string& id) { return engine_->midi_pitch_for_element(id); });
+            else
+                DRAXUL_LOG_DEBUG(LogCategory::App, "score: analysis timemap failed: %s",
+                    timemap_error.c_str());
+            session_->set_piece_profile(
+                analyze_piece(analysis_onsets, quarters_per_bar_, notated_fifths));
+            analysis_cached_source_ = source_bytes_;
+            analysis_cached_quarters_per_bar_ = quarters_per_bar_;
+            analysis_cached_notated_fifths_ = notated_fifths;
+            analysis_cache_valid_ = true;
+            ++analysis_build_count_;
+            // A fresh analysis invalidates any overlay built against the old
+            // profile (the paged view may already be holding pages).
+            rebuild_analysis_overlay();
+        }
+        else
+            session_->ensure_piece_profile_dump(); // repair a removed/corrupt dump
+
+        if (stream_->composing())
+        {
+            stream_->composer().set_drills_enabled(composer_drills_);
+            stream_->composer().set_scales_enabled(composer_scales_);
+            stream_->composer().configure(&stream_->slicer(), &session_->model(), &session_->piece_profile());
+            reset_stream_plan();
+        }
         if (start_in_gate_)
         {
             start_in_gate_ = false;
@@ -777,7 +847,8 @@ bool ScoreRuntime::queue_stream_engrave(int first_bar, double stream_q, bool fal
     return stream_->queue_engrave(std::move(*slice), current_engrave_params(), intent);
 }
 
-ScoreRuntime::FlowBuildResult ScoreRuntime::build_flow_from_engine(std::string& error)
+ScoreRuntime::FlowBuildResult ScoreRuntime::build_flow_from_engine(
+    std::string& error, bool preserve_on_failure)
 {
     // The whole-piece flow build (Clock conveyor, the `mono` strip, and the
     // initial engraving) shares its extraction with a rolling window; only the
@@ -788,6 +859,8 @@ ScoreRuntime::FlowBuildResult ScoreRuntime::build_flow_from_engine(std::string& 
     const EngraveResult result = engrave_loaded(*engine_, current_engrave_params(), engraved, error);
     if (result == EngraveResult::InterpretFailed)
         return FlowBuildResult::InterpretFailed;
+    if (result != EngraveResult::Ok && preserve_on_failure)
+        return FlowBuildResult::TransportFailed;
     // Show the strip even when the transport join fails (paged fallback).
     if (engraved.strip)
     {
@@ -797,6 +870,7 @@ ScoreRuntime::FlowBuildResult ScoreRuntime::build_flow_from_engine(std::string& 
     if (result != EngraveResult::Ok)
         return FlowBuildResult::TransportFailed;
     flow_ = std::move(engraved.flow);
+    roll_timeline_.clear();
     note_palette_ = std::move(engraved.palette);
     note_staff_ = std::move(engraved.staves);
     waterfall_notes_ = std::move(engraved.waterfall);
@@ -814,7 +888,8 @@ bool ScoreRuntime::rebuild_window(
     {
         stream_->cancel_async();
         DRAXUL_LOG_WARN(LogCategory::App, "score: window slice empty, monolithic strip");
-        stream_->set_windowed(false);
+        window_fallback_pending_ = true;
+        window_warning_ = "window slice unavailable; rebuilding the full score";
         flow_dirty_ = true;
         return false;
     }
@@ -840,11 +915,13 @@ bool ScoreRuntime::rebuild_window(
 
     EngravedWindow engraved;
     std::string error;
+    engine_document_may_be_slice_ = true;
     if (engrave_window(*engine_, slice->xml, params, engraved, error) != EngraveResult::Ok)
     {
         DRAXUL_LOG_WARN(LogCategory::App, "score: window build failed (%s), monolithic strip",
             error.c_str());
-        stream_->set_windowed(false);
+        window_fallback_pending_ = true;
+        window_warning_ = "window build failed: " + error;
         flow_dirty_ = true; // reload the full piece on the next pump
         return false;
     }
@@ -871,12 +948,14 @@ void ScoreRuntime::install_window(EngravedWindow&& engraved, int first_bar, int 
 
     strip_ = std::move(engraved.strip);
     flow_ = std::move(engraved.flow);
+    roll_timeline_.clear();
     note_palette_ = std::move(engraved.palette);
     note_staff_ = std::move(engraved.staves);
     waterfall_notes_ = std::move(engraved.waterfall);
     rebuild_highlight_from_palette();
 
     stream_->note_installed(first_bar, count, stream_offset_q);
+    engine_document_may_be_slice_ = true;
 
     if (carry)
     {
@@ -976,7 +1055,14 @@ void ScoreRuntime::restart_stream(bool keep_tempo)
     const double tempo = flow_.tempo_qpm();
     stream_->verdict_archive().clear();
     reset_stream_plan();
-    rebuild_window(0, 0.0, /*carry=*/false, /*preserve_tempo=*/keep_tempo);
+    roll_timeline_.clear();
+    if (window_fallback_pending_ || !stream_->windowed())
+    {
+        flow_.rewind();
+        flow_dirty_ = true;
+    }
+    else
+        rebuild_window(0, 0.0, /*carry=*/false, /*preserve_tempo=*/keep_tempo);
     if (keep_tempo && !lock_tempo_)
         flow_.set_tempo_qpm(tempo);
     if (callbacks_ != nullptr)
@@ -991,7 +1077,8 @@ void ScoreRuntime::reset_stream_plan()
 void ScoreRuntime::reengrave_flow_in_place()
 {
     presentation_->invalidate_scale_lock();
-    if (stream_active() && flow_.mode() == FlowController::TransportMode::Roll)
+    if (!window_fallback_pending_ && stream_active()
+        && flow_.mode() == FlowController::TransportMode::Roll)
         rebuild_window(stream_->window_first_bar(), stream_position_q(), /*carry=*/true);
     else
         flow_dirty_ = true;
@@ -1013,7 +1100,8 @@ void ScoreRuntime::maybe_urgent_rewrite()
     if (dirty == seen_dirty_passes_)
         return;
     seen_dirty_passes_ = dirty;
-    if (!stream_active() || flow_.mode() != FlowController::TransportMode::Roll
+    if (window_fallback_pending_ || !stream_active()
+        || flow_.mode() != FlowController::TransportMode::Roll
         || stream_->async_in_flight() || !stream_->engraver_available())
         return;
     const double stream_q = stream_position_q();
@@ -1027,7 +1115,8 @@ void ScoreRuntime::maybe_urgent_rewrite()
 
 void ScoreRuntime::maybe_advance_stream()
 {
-    if (!stream_active() || flow_.mode() != FlowController::TransportMode::Roll)
+    if (window_fallback_pending_ || !stream_active()
+        || flow_.mode() != FlowController::TransportMode::Roll)
         return;
     // A swap is already being engraved in the background; it installs in pump()
     // (poll_async_engrave). Don't queue a second one.
@@ -1084,7 +1173,8 @@ void ScoreRuntime::apply_completed_engrave(WindowEngraver::Done done, double int
         // simply keep the current valid engraving visible.
         if (fallback_to_monolith)
         {
-            stream_->set_windowed(false);
+            window_fallback_pending_ = true;
+            window_warning_ = "background window build failed; rebuilding the full score";
             flow_dirty_ = true;
         }
         return;
@@ -1112,6 +1202,7 @@ void ScoreRuntime::toggle_flow_mode()
 {
     if (!engine_ || !engine_->is_loaded())
         return;
+    roll_timeline_.clear();
     stream_->cancel_async();
     if (view_mode_ == ViewMode::Paged)
     {
@@ -1120,15 +1211,16 @@ void ScoreRuntime::toggle_flow_mode()
         // Returning to the runner: request Roll before the flow build primes
         // the slicer. The build then installs a rolling window when supported
         // or applies its existing whole-piece fallback.
-        if (game_mode_ == FlowController::TransportMode::Roll)
-            start_in_gate_ = true;
+        start_in_gate_ = game_mode_ != FlowController::TransportMode::Clock;
     }
     else
     {
-        if (flow_.mode() == FlowController::TransportMode::Gate)
+        start_in_gate_ = false;
+        if (flow_.mode() != FlowController::TransportMode::Clock)
             exit_gate_mode();
         view_mode_ = ViewMode::Paged;
         flow_.pause();
+        release_audio_output();
         layout_dirty_ = true; // re-engrave pages; scroll_y_ carries over
     }
     if (callbacks_ != nullptr)
@@ -1271,6 +1363,7 @@ void ScoreRuntime::enter_gate_mode(
 {
     if (!flow_.gates_ready())
         return;
+    roll_timeline_.clear();
     if (game_mode_ == FlowController::TransportMode::Roll && stream_->windowed() && stream_->slicer().ready())
     {
         // The runner plays on the rolling window from stream bar 0, with
@@ -1302,6 +1395,7 @@ void ScoreRuntime::enter_gate_mode(
 
 void ScoreRuntime::exit_gate_mode()
 {
+    roll_timeline_.clear();
     end_progress_session();
     stream_->cancel_async();
     release_input_device();
@@ -1471,7 +1565,8 @@ void ScoreRuntime::end_progress_session()
 void ScoreRuntime::clear_piece_progress()
 {
     session_->clear_progress();
-    begin_progress_session(); // session_active_ is false after clear — starts fresh
+    if (view_mode_ == ViewMode::Flow && flow_.mode() != FlowController::TransportMode::Clock)
+        begin_progress_session(); // only a live performance accrues practice time
     session_->save(/*final_flush=*/false); // overwrite the file with the cleared model
     // Restart the stream from the top so the composer re-plans against a blank
     // slate. A cleared record is the one restart that RESETS the tempo — a
@@ -1496,7 +1591,10 @@ void ScoreRuntime::pump()
 {
     const auto now = std::chrono::steady_clock::now();
     // Clamp long stalls (first frame, app pauses) to one frame's worth.
-    const double dt = std::clamp(std::chrono::duration<double>(now - last_pump_).count(), 0.0, 0.1);
+    const double wall_dt = std::max(0.0,
+        std::chrono::duration<double>(now - last_pump_).count());
+    const double dt = std::min(wall_dt, 0.1);
+    const double pump_seconds = std::chrono::duration<double>(now - epoch_).count();
     last_pump_ = now;
 
     // Poll regardless of transport/view state: paused spacing changes and
@@ -1513,7 +1611,18 @@ void ScoreRuntime::pump()
     if (view_mode_ == ViewMode::Flow && flow_.playing())
     {
         const double position_before_q = flow_.position_q();
-        flow_.advance(dt);
+        const bool roll = flow_.mode() == FlowController::TransportMode::Roll;
+        flow_.advance(dt, roll);
+        if (roll)
+        {
+            roll_timeline_.push_back({ pump_seconds - wall_dt, pump_seconds,
+                position_before_q, flow_.position_q() });
+            while (roll_timeline_.size() > 1
+                && roll_timeline_.front().end_seconds < pump_seconds - 0.15)
+                roll_timeline_.pop_front();
+        }
+        else
+            roll_timeline_.clear();
         if (audio_->wants_pump())
         {
             if (ensure_audio_output())
@@ -1539,10 +1648,29 @@ void ScoreRuntime::pump()
             if (input_rig_.active())
             {
                 std::vector<PlayerNoteEvent> events;
-                input_rig_.input()->poll(now_seconds(), events);
+                input_rig_.input()->poll(pump_seconds, events);
                 if (!events.empty())
-                    flow_.judge(events);
+                {
+                    if (roll)
+                    {
+                        std::vector<PlayerNoteEvent> mapped_events;
+                        std::vector<double> mapped_positions;
+                        for (const PlayerNoteEvent& event : events)
+                        {
+                            if (const auto event_q = event_position_q(event.t_seconds))
+                            {
+                                mapped_events.push_back(event);
+                                mapped_positions.push_back(*event_q);
+                            }
+                        }
+                        flow_.judge_at(mapped_events, mapped_positions);
+                    }
+                    else
+                        flow_.judge(events);
+                }
             }
+            if (roll)
+                flow_.expire_roll();
             apply_verdict_update();
 
             // Player memory: verdicts archive on the STREAM axis (for
@@ -1953,6 +2081,7 @@ void ScoreRuntime::on_key(const KeyEvent& event)
         switch (event.keycode)
         {
         case SDLK_SPACE:
+            roll_timeline_.clear();
             if (flow_.playing())
                 flow_.pause();
             else
@@ -1965,6 +2094,7 @@ void ScoreRuntime::on_key(const KeyEvent& event)
             flow_.set_tempo_qpm(flow_.tempo_qpm() * 1.04);
             break;
         case SDLK_R:
+            roll_timeline_.clear();
             if (stream_active() && flow_.mode() == FlowController::TransportMode::Roll)
             {
                 restart_stream(/*keep_tempo=*/true);
@@ -2123,6 +2253,8 @@ std::string ScoreRuntime::status_text() const
     }
 
     std::string status = "score: " + title;
+    if (!window_warning_.empty())
+        status += "  warning: " + window_warning_;
     if (!device_error_.empty())
         status += "  device: " + device_error_;
     if (view_mode_ == ViewMode::Flow && flow_.ready())

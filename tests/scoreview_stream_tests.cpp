@@ -59,14 +59,18 @@ TEST_CASE("slicer indexes the Grieg and its bar geometry", "[scoreview][stream]"
     CHECK(slicer.bar_at(10000.0) == 78); // clamped
 }
 
-TEST_CASE("multipart slicing rejects a window missing from a later part",
+TEST_CASE("multipart slicing rejects inconsistent part lengths before any window",
     "[scoreview][stream]")
 {
-    SourceSlicer slicer;
-    std::string error;
-    REQUIRE(slicer.load(multipart_score_xml(1), error));
-    CHECK(slicer.bar_count() == 2);
-    CHECK(slicer.window_xml(0, 2).empty());
+    for (const int trailing_measures : { 0, 1, 3 })
+    {
+        SourceSlicer slicer;
+        std::string error;
+        CHECK_FALSE(slicer.load(multipart_score_xml(trailing_measures), error));
+        CHECK(error == "source parts have inconsistent measure counts");
+        CHECK_FALSE(slicer.ready());
+        CHECK(slicer.window_xml(0, 1).empty());
+    }
 }
 
 TEST_CASE("multipart slicing preserves equal-length parts and their state",

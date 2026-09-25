@@ -17,6 +17,7 @@
 #include <draxul/scoreview/window_engraver.h>
 
 #include <chrono>
+#include <deque>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -175,6 +176,7 @@ private:
     void relayout_flow();
     void rebuild_analysis_overlay();
     void toggle_flow_mode();
+    static FlowController::TransportMode launch_transport_intent(std::string_view mode);
     void apply_lit_update();
     void apply_verdict_update();
     int approx_measure() const;
@@ -192,6 +194,7 @@ private:
     };
     std::optional<PlayheadSource> playhead_source() const;
     double now_seconds() const;
+    std::optional<double> event_position_q(double event_seconds) const;
     // The rolling window (plans/scoreview-stream.md S2): the roll game runs
     // on a short re-engraved window of the stream; the transport's local
     // axis maps to the stream via stream_offset_q_.
@@ -201,7 +204,8 @@ private:
         TransportFailed,
         Ok,
     };
-    FlowBuildResult build_flow_from_engine(std::string& error);
+    FlowBuildResult build_flow_from_engine(std::string& error,
+        bool preserve_on_failure = false);
     // The engrave inputs a rolling-window rebuild shares (kanban 22): pixel
     // scale, the piece marking, tempo lock, and the spacing overrides.
     // (build_flow_from_engine deliberately fills a partial set — it leaves the
@@ -325,6 +329,16 @@ private:
     FlowController flow_;
     ScoreHighlightState highlight_;
     std::chrono::steady_clock::time_point last_pump_{};
+    struct TransportSegment
+    {
+        double start_seconds = 0.0;
+        double end_seconds = 0.0;
+        double start_q = 0.0;
+        double end_q = 0.0;
+    };
+    // Enough event-time history for callback/queue delivery jitter. Pause,
+    // seek, and document replacement clear it before a new timeline begins.
+    std::deque<TransportSegment> roll_timeline_;
 
     // Gate state (plans/scoreview-gate.md). The rig owns the live input
     // implementation and the selection/fallback policy; the host talks to
@@ -352,6 +366,15 @@ private:
     // view/transport checks. Internal component; never null.
     std::unique_ptr<ScoreStreamController> stream_;
     std::string source_bytes_;
+    // A synchronous engrave may load slice XML then fail before installation.
+    bool engine_document_may_be_slice_ = false;
+    bool window_fallback_pending_ = false;
+    std::string window_warning_;
+    bool analysis_cache_valid_ = false;
+    std::string analysis_cached_source_;
+    double analysis_cached_quarters_per_bar_ = 0.0;
+    std::optional<int> analysis_cached_notated_fifths_;
+    int analysis_build_count_ = 0;
     double piece_marking_qpm_ = 0.0;
 
     // The frame composer (kanban 21 ScorePresentation): NanoVG recording

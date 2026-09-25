@@ -38,12 +38,15 @@ class DeterministicLayoutEngine final : public ILayoutEngine
 public:
     DeterministicLayoutEngine(
         std::shared_ptr<FakeEngineState> state, std::string svg, bool block_load,
-        bool require_timemap_for_midi = false, bool fail_load = false)
+        bool require_timemap_for_midi = false, bool fail_load = false,
+        int fail_interpret_on_load_call = 0, int fail_timemap_on_load_call = 0)
         : state_(std::move(state))
         , svg_(std::move(svg))
         , block_load_(block_load)
         , require_timemap_for_midi_(require_timemap_for_midi)
         , fail_load_(fail_load)
+        , fail_interpret_on_load_call_(fail_interpret_on_load_call)
+        , fail_timemap_on_load_call_(fail_timemap_on_load_call)
     {
     }
 
@@ -59,6 +62,7 @@ public:
         std::unique_lock lock(state_->mutex);
         ++state_->load_calls;
         const int call = state_->load_calls;
+        current_load_call_ = call;
         state_->payloads.emplace_back(bytes);
         state_->changed.notify_all();
         if (block_load_)
@@ -84,7 +88,10 @@ public:
     }
     std::string render_page_svg(int page_number) override
     {
-        return loaded_ && page_number == 1 ? svg_ : std::string{};
+        return loaded_ && page_number == 1
+                && current_load_call_ != fail_interpret_on_load_call_
+            ? svg_
+            : std::string{};
     }
     std::string render_timemap() override;
     int midi_pitch_for_element(const std::string& element_id) override
@@ -108,6 +115,9 @@ private:
     bool block_load_ = false;
     bool require_timemap_for_midi_ = false;
     bool fail_load_ = false;
+    int fail_interpret_on_load_call_ = 0;
+    int fail_timemap_on_load_call_ = 0;
+    int current_load_call_ = 0;
     bool timemap_rendered_ = false;
     bool loaded_ = false;
 };
@@ -137,6 +147,8 @@ inline constexpr std::string_view kScoreHostFixtureTimemap = R"json([
 inline std::string DeterministicLayoutEngine::render_timemap()
 {
     timemap_rendered_ = true;
+    if (current_load_call_ == fail_timemap_on_load_call_)
+        return "invalid timemap";
     return loaded_ ? std::string(kScoreHostFixtureTimemap) : std::string{};
 }
 

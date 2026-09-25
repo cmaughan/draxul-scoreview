@@ -540,6 +540,230 @@ TEST_CASE("switching a paged score enters the rolling play view before the slice
     CHECK(ScoreHostTestAccess::waterfall_note_count(host) > 0);
 }
 
+TEST_CASE("paged round trips preserve the selected flow transport and end performance sessions",
+    "[scoreview][host][orchestration][view]")
+{
+    using Mode = draxul::scoreview::FlowController::TransportMode;
+    using draxul::scoreview::ScoreDeviceKind;
+    const Mode modes[] = { Mode::Clock, Mode::Roll, Mode::Gate };
+    for (const Mode intent : modes)
+    {
+        DYNAMIC_SECTION(static_cast<int>(intent))
+        {
+            PrimedHost primed;
+            REQUIRE(primed.prime());
+            ScoreHostTestAccess::set_flow_intent(primed.host, intent);
+            auto leases = draxul::scoreview::create_score_device_lease_provider();
+            REQUIRE(ScoreHostTestAccess::acquire_audio_lease(primed.host, leases));
+            REQUIRE(ScoreHostTestAccess::acquire_input_lease(
+                primed.host, leases, ScoreDeviceKind::Microphone, "default"));
+            const draxul::tests::TempDir progress("scoreview-paged-roundtrip");
+            REQUIRE(ScoreHostTestAccess::attach_progress_session(primed.host, progress.path));
+            ScoreHostTestAccess::set_transport(primed.host, 0.0, 96.0, true);
+
+            ScoreHostTestAccess::toggle_flow_mode(primed.host);
+            CHECK(ScoreHostTestAccess::paged(primed.host));
+            CHECK(ScoreHostTestAccess::transport_mode(primed.host) == Mode::Clock);
+            CHECK_FALSE(ScoreHostTestAccess::playing(primed.host));
+            CHECK_FALSE(ScoreHostTestAccess::session_active(primed.host));
+            CHECK_FALSE(ScoreHostTestAccess::pending_performance_entry(primed.host));
+            int competitor = 0;
+            CHECK(leases->acquire(ScoreDeviceKind::AudioOutput, "default", &competitor).lease);
+            CHECK(leases->acquire(ScoreDeviceKind::Microphone, "default", &competitor).lease);
+
+            ScoreHostTestAccess::toggle_flow_mode(primed.host);
+            CHECK(ScoreHostTestAccess::pending_performance_entry(primed.host)
+                == (intent != Mode::Clock));
+            ScoreHostTestAccess::relayout_flow(primed.host);
+            CHECK(ScoreHostTestAccess::transport_mode(primed.host) == intent);
+            CHECK_FALSE(ScoreHostTestAccess::pending_performance_entry(primed.host));
+        }
+    }
+}
+
+TEST_CASE("ScoreView launch modes keep transport intent separate from window capability",
+    "[scoreview][host][orchestration][view]")
+{
+    using Mode = draxul::scoreview::FlowController::TransportMode;
+    CHECK(ScoreHostTestAccess::launch_intent("paged") == Mode::Roll);
+    CHECK(ScoreHostTestAccess::launch_intent("roll-notick") == Mode::Roll);
+    CHECK(ScoreHostTestAccess::launch_intent("roll-mono") == Mode::Roll);
+    CHECK(ScoreHostTestAccess::launch_intent("gate-bot") == Mode::Gate);
+    CHECK(ScoreHostTestAccess::launch_intent("gate-mic") == Mode::Gate);
+    CHECK(ScoreHostTestAccess::launch_intent("flow") == Mode::Clock);
+    CHECK(ScoreHostTestAccess::launch_intent("flow-autoplay") == Mode::Clock);
+
+    PrimedHost primed;
+    REQUIRE(primed.prime());
+    ScoreHostTestAccess::toggle_flow_mode(primed.host); // Flow -> Paged
+    ScoreHostTestAccess::toggle_flow_mode(primed.host); // Paged -> Flow, build pending
+    CHECK(ScoreHostTestAccess::pending_performance_entry(primed.host));
+    ScoreHostTestAccess::toggle_flow_mode(primed.host); // cancelled before build
+    CHECK(ScoreHostTestAccess::paged(primed.host));
+    CHECK_FALSE(ScoreHostTestAccess::pending_performance_entry(primed.host));
+    CHECK(ScoreHostTestAccess::transport_mode(primed.host) == Mode::Clock);
+}
+
+TEST_CASE("window capability never changes Roll transport intent",
+    "[scoreview][host][orchestration][view]")
+{
+    const std::string svg = read_verovio_svg_fixture();
+    REQUIRE_FALSE(svg.empty());
+    const std::string ordinary = [] {
+        std::string xml(kScoreHostFixtureMinimalScore);
+        const size_t part_end = xml.rfind("</part>");
+        xml.insert(part_end,
+            "<measure number=\"2\"><note><rest/><duration>4</duration>"
+            "<type>whole</type></note></measure>");
+        return xml;
+    }();
+    struct SourceCase
+    {
+        const char* name;
+        std::string source;
+        bool force_mono;
+        bool expect_window;
+    };
+    const SourceCase cases[] = {
+        { "ordinary", ordinary, false, true },
+        { "one bar", std::string(kScoreHostFixtureMinimalScore), false, false },
+        { "compressed mxl", "PK compressed MusicXML fixture", false, false },
+        { "mono", ordinary, true, false },
+    };
+    for (const SourceCase& source : cases)
+    {
+        DYNAMIC_SECTION(source.name)
+        {
+            auto state = std::make_shared<FakeEngineState>();
+            ScoreHost host;
+            std::string error;
+            REQUIRE(ScoreHostTestAccess::prime_paged(host,
+                std::make_unique<DeterministicLayoutEngine>(state, svg, false),
+                source.source, error));
+            if (source.force_mono)
+                ScoreHostTestAccess::disable_windowing(host);
+            ScoreHostTestAccess::toggle_flow_mode(host);
+            ScoreHostTestAccess::relayout_flow(host);
+            CHECK(ScoreHostTestAccess::transport_mode(host)
+                == draxul::scoreview::FlowController::TransportMode::Roll);
+            CHECK(ScoreHostTestAccess::stream_windowed(host) == source.expect_window);
+            CHECK(ScoreHostTestAccess::stream_active(host) == source.expect_window);
+        }
+    }
+}
+
+TEST_CASE("failed flow builds clear pending intent before a later retry",
+    "[scoreview][host][orchestration][view]")
+{
+    const std::string svg = read_verovio_svg_fixture();
+    REQUIRE_FALSE(svg.empty());
+    for (const bool fail_transport : { false, true })
+    {
+        DYNAMIC_SECTION("failure " << (fail_transport ? "transport" : "interpretation"))
+        {
+            auto state = std::make_shared<FakeEngineState>();
+            ScoreHost host;
+            std::string error;
+            REQUIRE(ScoreHostTestAccess::prime_paged(host,
+                std::make_unique<DeterministicLayoutEngine>(state, svg, false,
+                    /*require_timemap_for_midi=*/false, /*fail_load=*/false,
+                    /*fail_interpret_on_load_call=*/fail_transport ? 0 : 1,
+                    /*fail_timemap_on_load_call=*/fail_transport ? 1 : 0),
+                kScoreHostFixtureMinimalScore, error));
+            ScoreHostTestAccess::toggle_flow_mode(host);
+            REQUIRE(ScoreHostTestAccess::pending_performance_entry(host));
+            ScoreHostTestAccess::relayout_flow(host);
+            CHECK_FALSE(ScoreHostTestAccess::pending_performance_entry(host));
+            CHECK(ScoreHostTestAccess::transport_mode(host)
+                == draxul::scoreview::FlowController::TransportMode::Clock);
+
+            if (!ScoreHostTestAccess::paged(host))
+                ScoreHostTestAccess::toggle_flow_mode(host);
+            REQUIRE(ScoreHostTestAccess::reload_source(host));
+            ScoreHostTestAccess::toggle_flow_mode(host);
+            ScoreHostTestAccess::relayout_flow(host);
+            CHECK_FALSE(ScoreHostTestAccess::pending_performance_entry(host));
+            CHECK(ScoreHostTestAccess::transport_mode(host)
+                == draxul::scoreview::FlowController::TransportMode::Roll);
+        }
+    }
+}
+
+TEST_CASE("Roll judges queued keyboard events at arrival time before closing the window",
+    "[scoreview][host][orchestration][input]")
+{
+    const auto run = [](double event_at_seconds) {
+        PrimedHost primed;
+        REQUIRE(primed.prime());
+        ScoreHostTestAccess::pump_roll_event(primed.host, event_at_seconds,
+            /*pump_at_seconds=*/0.46, /*elapsed_seconds=*/0.03, /*pitch=*/60);
+        return std::pair{ ScoreHostTestAccess::miss_count(primed.host),
+            ScoreHostTestAccess::wrong_count(primed.host) };
+    };
+    // At 60 QPM the late boundary for the onset at zero is 0.45s.
+    // Delivery at 0.46s must not turn the 0.44s arrival into a miss.
+    CHECK(run(0.44).first == 0);
+    CHECK(run(0.46).second == 1); // genuinely late input is a stray
+}
+
+TEST_CASE("monolithic Roll rewind clears stale event-time history",
+    "[scoreview][host][orchestration][input]")
+{
+    PrimedHost primed;
+    REQUIRE(primed.prime());
+    ScoreHostTestAccess::disable_windowing(primed.host);
+    CHECK(ScoreHostTestAccess::rewind_clears_roll_history(primed.host));
+    CHECK(ScoreHostTestAccess::position_q(primed.host) == Catch::Approx(0.0));
+}
+
+TEST_CASE("unchanged flow analysis is reused and missing dumps are repaired",
+    "[scoreview][host][orchestration][analysis]")
+{
+    const std::string svg = read_verovio_svg_fixture();
+    REQUIRE_FALSE(svg.empty());
+    auto state = std::make_shared<FakeEngineState>();
+    ScoreHost host;
+    std::string error;
+    REQUIRE(ScoreHostTestAccess::prime_paged(host,
+        std::make_unique<DeterministicLayoutEngine>(state, svg, false),
+        kScoreHostFixtureMinimalScore, error));
+    const draxul::tests::TempDir progress("scoreview-analysis-cache");
+    ScoreHostTestAccess::attach_analysis_source(host, progress.path);
+    ScoreHostTestAccess::set_flow_intent(host,
+        draxul::scoreview::FlowController::TransportMode::Clock);
+    const auto rebuild = [&]() {
+        if (!ScoreHostTestAccess::paged(host))
+            ScoreHostTestAccess::toggle_flow_mode(host);
+        ScoreHostTestAccess::toggle_flow_mode(host);
+        ScoreHostTestAccess::relayout_flow(host);
+    };
+    rebuild();
+    REQUIRE(ScoreHostTestAccess::analysis_build_count(host) == 1);
+    REQUIRE(ScoreHostTestAccess::analysis_dump_write_count(host) == 1);
+    rebuild();
+    CHECK(ScoreHostTestAccess::analysis_build_count(host) == 1);
+    CHECK(ScoreHostTestAccess::analysis_dump_write_count(host) == 1);
+
+    auto dump = draxul::scoreview::progress_path(progress.path,
+        std::string(kScoreHostFixtureMinimalScore));
+    dump.replace_extension(".analysis.json");
+    REQUIRE(std::filesystem::remove(dump));
+    rebuild();
+    CHECK(ScoreHostTestAccess::analysis_build_count(host) == 1);
+    CHECK(ScoreHostTestAccess::analysis_dump_write_count(host) == 2);
+    { std::ofstream corrupt(dump); corrupt << "{corrupt"; }
+    rebuild();
+    CHECK(ScoreHostTestAccess::analysis_build_count(host) == 1);
+    CHECK(ScoreHostTestAccess::analysis_dump_write_count(host) == 3);
+
+    const std::string replaced = std::string(kScoreHostFixtureMinimalScore)
+        + "<!-- new source identity -->";
+    REQUIRE(ScoreHostTestAccess::replace_analysis_source(host, replaced, progress.path));
+    rebuild();
+    CHECK(ScoreHostTestAccess::analysis_build_count(host) == 2);
+    CHECK(ScoreHostTestAccess::analysis_dump_write_count(host) == 4);
+}
+
 TEST_CASE("score audio can prefer a staged piano lazily",
     "[scoreview][host][orchestration][audio]")
 {
@@ -556,6 +780,19 @@ TEST_CASE("score audio can prefer a staged piano lazily",
     CHECK_FALSE(audio.audition());
     CHECK(audio.tick_level() == ScoreAudioController::TickLevel::Off);
     CHECK_FALSE(audio.wants_pump());
+}
+
+TEST_CASE("score launch tick options are independent of tempo lock and each other",
+    "[scoreview][host][orchestration][audio]")
+{
+    using TickLevel = ScoreAudioController::TickLevel;
+    CHECK(ScoreAudioController::tick_level_from_mode("roll-notick") == TickLevel::Off);
+    CHECK(ScoreAudioController::tick_level_from_mode("roll-tick") == TickLevel::Beats);
+    CHECK(ScoreAudioController::tick_level_from_mode("roll-tick8") == TickLevel::Eighths);
+    CHECK(ScoreAudioController::tick_level_from_mode("roll-notick-locktempo") == TickLevel::Off);
+    CHECK(ScoreAudioController::tick_level_from_mode("roll-locktempo-tick8") == TickLevel::Eighths);
+    CHECK_FALSE(ScoreAudioController::tick_level_from_mode("roll-locktempo"));
+    CHECK_FALSE(ScoreAudioController::tick_level_from_mode("roll-antick"));
 }
 
 TEST_CASE("the session controller survives a corrupt progress file",

@@ -1,6 +1,7 @@
 #include <catch2/catch_all.hpp>
 
 #include "support/scoreview_host_fixture.h"
+#include "support/temp_dir.h"
 
 #include <chrono>
 #include <memory>
@@ -144,4 +145,134 @@ TEST_CASE("ScoreHost uses synchronous restart and restyle when its worker is una
     CHECK(ScoreHostTestAccess::position_q(host) == Catch::Approx(1.0));
     CHECK(ScoreHostTestAccess::tempo_qpm(host) == Catch::Approx(tempo));
     CHECK(ScoreHostTestAccess::playing(host));
+}
+
+TEST_CASE("failed initial slice interpretation reloads the complete source before flow fallback",
+    "[scoreview][host][engraver][fallback]")
+{
+    const std::string svg = read_verovio_svg_fixture();
+    REQUIRE_FALSE(svg.empty());
+    auto state = std::make_shared<FakeEngineState>();
+    ScoreHost host;
+    std::string error;
+    CHECK_FALSE(ScoreHostTestAccess::prime_window(host,
+        std::make_unique<DeterministicLayoutEngine>(state, svg, false,
+            /*require_timemap_for_midi=*/false, /*fail_load=*/false,
+            /*fail_interpret_on_load_call=*/1),
+        kMinimalScore, error));
+    REQUIRE(ScoreHostTestAccess::fallback_pending(host));
+    CHECK(ScoreHostTestAccess::stream_windowed(host));
+    ScoreHostTestAccess::relayout_flow(host);
+    CHECK_FALSE(ScoreHostTestAccess::fallback_pending(host));
+    CHECK_FALSE(ScoreHostTestAccess::stream_windowed(host));
+    CHECK_FALSE(ScoreHostTestAccess::stream_active(host));
+    REQUIRE(ScoreHostTestAccess::strip(host));
+    REQUIRE(state->payloads.size() == 2);
+    CHECK(state->payloads.back() == kMinimalScore);
+}
+
+TEST_CASE("failed async advance keeps the old engraving until whole-source fallback succeeds",
+    "[scoreview][host][engraver][fallback]")
+{
+    const std::string svg = read_verovio_svg_fixture();
+    REQUIRE_FALSE(svg.empty());
+    auto state = std::make_shared<FakeEngineState>();
+    ScoreHost host;
+    std::string error;
+    REQUIRE(ScoreHostTestAccess::prime_window(host,
+        std::make_unique<DeterministicLayoutEngine>(state, svg, false),
+        kMinimalScore, error));
+    const auto valid_strip = ScoreHostTestAccess::strip(host);
+    REQUIRE(valid_strip);
+    ScoreHostTestAccess::fail_async_advance(host);
+    CHECK(ScoreHostTestAccess::fallback_pending(host));
+    CHECK(ScoreHostTestAccess::stream_active(host));
+    CHECK(ScoreHostTestAccess::stream_windowed(host));
+    CHECK(ScoreHostTestAccess::strip(host).get() == valid_strip.get());
+    ScoreHostTestAccess::relayout_flow(host);
+    CHECK_FALSE(ScoreHostTestAccess::fallback_pending(host));
+    CHECK_FALSE(ScoreHostTestAccess::stream_active(host));
+    CHECK_FALSE(ScoreHostTestAccess::stream_windowed(host));
+    REQUIRE(state->payloads.size() == 2);
+    CHECK(state->payloads.back() == kMinimalScore);
+}
+
+TEST_CASE("failed full-source recovery retains the last valid engraving",
+    "[scoreview][host][engraver][fallback]")
+{
+    const std::string svg = read_verovio_svg_fixture();
+    REQUIRE_FALSE(svg.empty());
+    auto state = std::make_shared<FakeEngineState>();
+    ScoreHost host;
+    std::string error;
+    REQUIRE(ScoreHostTestAccess::prime_window(host,
+        std::make_unique<DeterministicLayoutEngine>(state, svg, false,
+            /*require_timemap_for_midi=*/false, /*fail_load=*/false,
+            /*fail_interpret_on_load_call=*/2),
+        kMinimalScore, error));
+    const auto valid_strip = ScoreHostTestAccess::strip(host);
+    REQUIRE(valid_strip);
+    ScoreHostTestAccess::fail_async_advance(host);
+    ScoreHostTestAccess::relayout_flow(host);
+    CHECK(ScoreHostTestAccess::fallback_pending(host));
+    CHECK(ScoreHostTestAccess::stream_windowed(host));
+    CHECK(ScoreHostTestAccess::stream_active(host));
+    CHECK(ScoreHostTestAccess::strip(host).get() == valid_strip.get());
+}
+
+TEST_CASE("a failed initial slice cannot become the complete paged score",
+    "[scoreview][host][engraver][fallback]")
+{
+    const std::string svg = read_verovio_svg_fixture();
+    REQUIRE_FALSE(svg.empty());
+    auto state = std::make_shared<FakeEngineState>();
+    ScoreHost host;
+    std::string error;
+    CHECK_FALSE(ScoreHostTestAccess::prime_window(host,
+        std::make_unique<DeterministicLayoutEngine>(state, svg, false,
+            /*require_timemap_for_midi=*/false, /*fail_load=*/false,
+            /*fail_interpret_on_load_call=*/1),
+        kMinimalScore, error));
+    REQUIRE(ScoreHostTestAccess::fallback_pending(host));
+    ScoreHostTestAccess::relayout_paged(host);
+    REQUIRE(state->payloads.size() == 2);
+    CHECK(state->payloads.back() == kMinimalScore);
+    CHECK(ScoreHostTestAccess::paged_page_count(host) == 1);
+    CHECK_FALSE(ScoreHostTestAccess::stream_active(host));
+}
+
+TEST_CASE("restart and clear-progress stay monolithic after window fallback",
+    "[scoreview][host][engraver][fallback]")
+{
+    const std::string svg = read_verovio_svg_fixture();
+    REQUIRE_FALSE(svg.empty());
+    auto state = std::make_shared<FakeEngineState>();
+    ScoreHost host;
+    std::string error;
+    CHECK_FALSE(ScoreHostTestAccess::prime_window(host,
+        std::make_unique<DeterministicLayoutEngine>(state, svg, false,
+            /*require_timemap_for_midi=*/false, /*fail_load=*/false,
+            /*fail_interpret_on_load_call=*/1),
+        kMinimalScore, error));
+    const draxul::tests::TempDir progress("scoreview-fallback-progress");
+    ScoreHostTestAccess::attach_analysis_source(host, progress.path);
+    ScoreHostTestAccess::relayout_flow(host);
+    REQUIRE_FALSE(ScoreHostTestAccess::stream_windowed(host));
+    REQUIRE_FALSE(ScoreHostTestAccess::stream_active(host));
+
+    ScoreHostTestAccess::restart(host);
+    ScoreHostTestAccess::relayout_flow(host);
+    CHECK_FALSE(ScoreHostTestAccess::stream_windowed(host));
+    CHECK_FALSE(ScoreHostTestAccess::stream_active(host));
+    CHECK(ScoreHostTestAccess::strip(host));
+    ScoreHostTestAccess::clear_progress(host);
+    ScoreHostTestAccess::relayout_flow(host);
+    CHECK_FALSE(ScoreHostTestAccess::stream_windowed(host));
+    CHECK_FALSE(ScoreHostTestAccess::stream_active(host));
+    CHECK(ScoreHostTestAccess::strip(host));
+    for (const std::string& payload : state->payloads)
+    {
+        if (payload != state->payloads.front())
+            CHECK(payload == kMinimalScore);
+    }
 }

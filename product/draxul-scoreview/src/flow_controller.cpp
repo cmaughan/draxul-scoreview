@@ -311,10 +311,24 @@ void FlowController::judge(const std::vector<PlayerNoteEvent>& events)
     }
 }
 
-void FlowController::judge_roll(const std::vector<PlayerNoteEvent>& events)
+void FlowController::judge_at(const std::vector<PlayerNoteEvent>& events,
+    const std::vector<double>& event_positions_q)
 {
-    for (const PlayerNoteEvent& event : events)
+    if (mode_ == TransportMode::Roll && gates_ready()
+        && events.size() == event_positions_q.size())
+        judge_roll(events, &event_positions_q);
+    else
+        judge(events);
+}
+
+void FlowController::judge_roll(const std::vector<PlayerNoteEvent>& events,
+    const std::vector<double>* event_positions_q)
+{
+    for (size_t event_index = 0; event_index < events.size(); ++event_index)
     {
+        const PlayerNoteEvent& event = events[event_index];
+        const double event_q = event_positions_q != nullptr
+            ? (*event_positions_q)[event_index] : position_q_;
         // The nearest in-window onset still needing this pitch wins.
         GateNote* best_note = nullptr;
         double best_onset_q = 0.0;
@@ -323,9 +337,9 @@ void FlowController::judge_roll(const std::vector<PlayerNoteEvent>& events)
         for (size_t i = roll_resolved_; i < gates_.size(); ++i)
         {
             const double q = onsets_[i].qstamp;
-            if (q > position_q_ + kRollEarlyWindowQ)
+            if (q > event_q + kRollEarlyWindowQ)
                 break;
-            if (q < position_q_ - kRollLateWindowQ)
+            if (q < event_q - kRollLateWindowQ)
                 continue;
             for (GateNote& note : gates_[i].notes)
             {
@@ -337,7 +351,7 @@ void FlowController::judge_roll(const std::vector<PlayerNoteEvent>& events)
                         revoiced = &note;
                     continue;
                 }
-                const double distance = std::abs(q - position_q_);
+                const double distance = std::abs(q - event_q);
                 if (distance < best_distance)
                 {
                     best_distance = distance;
@@ -349,7 +363,7 @@ void FlowController::judge_roll(const std::vector<PlayerNoteEvent>& events)
         if (best_note != nullptr)
         {
             best_note->verdict = NoteVerdict::Correct;
-            best_note->hit_delta_q = position_q_ - best_onset_q;
+            best_note->hit_delta_q = event_q - best_onset_q;
             verdict_changes_.emplace_back(best_note->id, NoteVerdict::Correct);
             ++streak_;
             const double bonus = 1.0 + 0.1 * std::min(streak_, kStreakBonusCap);
@@ -384,7 +398,7 @@ void FlowController::judge_roll(const std::vector<PlayerNoteEvent>& events)
         streak_ = 0;
         accuracy_sample(0.0);
         NoteOutcome stray;
-        stray.onset_q = position_q_;
+        stray.onset_q = event_q;
         stray.pitch = event.midi_pitch;
         stray.stray = true;
         note_outcomes_.push_back(std::move(stray));
@@ -395,7 +409,8 @@ void FlowController::resolve_roll_passed()
 {
     while (roll_resolved_ < gates_.size())
     {
-        if (position_q_ <= onsets_[roll_resolved_].qstamp + kRollLateWindowQ)
+        if (position_q_ <= onsets_[roll_resolved_].qstamp + kRollLateWindowQ
+                + tempo_qpm_ / 60.0 * 0.10)
             break; // window still open
         Gate& gate = gates_[roll_resolved_];
         const double onset_q = onsets_[roll_resolved_].qstamp;
@@ -633,7 +648,7 @@ void FlowController::seek(double qstamp)
     position_q_ = clamped;
 }
 
-void FlowController::advance(double wall_dt_seconds)
+void FlowController::advance(double wall_dt_seconds, bool defer_roll_expiration)
 {
     if (!playing_ || wall_dt_seconds <= 0.0)
         return;
@@ -654,10 +669,13 @@ void FlowController::advance(double wall_dt_seconds)
         // piece only finishes once the LAST window has closed — the final
         // notes get their full late window like every other.
         position_q_ += wall_dt_seconds * tempo_qpm_ / 60.0;
-        resolve_roll_passed();
-        if (position_q_ >= duration_q_ + kRollLateWindowQ)
+        if (!defer_roll_expiration)
+            resolve_roll_passed();
+        if (position_q_ >= duration_q_ + kRollLateWindowQ
+                + tempo_qpm_ / 60.0 * 0.10)
         {
-            position_q_ = duration_q_;
+            if (!defer_roll_expiration)
+                position_q_ = duration_q_;
             playing_ = false;
         }
         return;
@@ -692,6 +710,16 @@ void FlowController::advance(double wall_dt_seconds)
     {
         position_q_ = duration_q_;
         playing_ = false;
+    }
+}
+
+void FlowController::expire_roll()
+{
+    if (mode_ == TransportMode::Roll)
+    {
+        resolve_roll_passed();
+        if (!playing_ && position_q_ > duration_q_)
+            position_q_ = duration_q_;
     }
 }
 
