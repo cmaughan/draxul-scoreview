@@ -44,13 +44,13 @@ foreach(_target draxul-test-scoreview draxul-test-scoreview-runtime)
     endif()
 endforeach()
 
-add_dependencies(draxul-test-app draxul-scoreview-plugin)
-target_compile_definitions(draxul-test-app PRIVATE
+add_dependencies(draxul-test-plugin-integration draxul-scoreview-plugin)
+target_compile_definitions(draxul-test-plugin-integration PRIVATE
     DRAXUL_SCOREVIEW_PLUGIN_PATH="$<TARGET_FILE:draxul-scoreview-plugin>")
 if(WIN32)
-    add_custom_command(TARGET draxul-test-app POST_BUILD
+    add_custom_command(TARGET draxul-test-plugin-integration POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_FILE:verovio> $<TARGET_FILE_DIR:draxul-test-app>)
+            $<TARGET_FILE:verovio> $<TARGET_FILE_DIR:draxul-test-plugin-integration>)
 endif()
 
 # Cold copied-tree extraction remains opt-in because rebuilding Verovio is
