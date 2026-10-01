@@ -1,0 +1,6 @@
+version = 1
+columns = ["ice-box", "pending", "done"]
+[cards]
+ice-box = ["18 hostile-mxl-inputs -test.md", "19 source-slicer-corpus-equivalence -test.md"]
+pending = ["01 scoreview-header-ownership -refactor.md", "02 scoreview-height-only-viewport -perf.md", "03 scoreview-offscreen-flow-culling -perf.md", "04 scoreview-progress-persistence -perf.md", "05 scoreview-engraver-completion-wake -perf.md", "06 scoreview-paged-layout-worker -perf.md"]
+done = []
