@@ -1,5 +1,7 @@
 # Separate ScoreView pipeline/runtime headers and audio dependency
 
+**Summary:** Give ScoreView's score-processing and live-display code explicit interfaces and audio dependencies so each can be built without accidentally depending on the other's internals.
+
 **Priority:** P2 — shared include root and pass-through audio link obscure ownership.  
 **Source:** `plugins/scoreview/product/draxul-scoreview/CMakeLists.txt`  
 **Proposed by:** Claude 46, narrowed. **Owner:** one ScoreView agent.  

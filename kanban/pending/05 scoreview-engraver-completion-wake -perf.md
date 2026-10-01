@@ -1,5 +1,7 @@
 # Wake ScoreView when background engraving completes
 
+**Summary:** Notify ScoreView when background score layout finishes so paused views do not repeatedly redraw just to check whether the work is done.
+
 **Source:** `plugins/scoreview/product/draxul-scoreview/src/score_runtime.cpp`  
 **Priority/evidence:** P2; static, high confidence. **Reported by:** Claude. Lines 1748–1749 schedule a 16 ms deadline merely while the engraver is busy; `scoreview_plugin.cpp:318–320` converts that deadline into redraw. Paused views can render repeatedly just to poll for completion.
 

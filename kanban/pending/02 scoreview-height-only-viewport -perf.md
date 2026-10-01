@@ -1,5 +1,7 @@
 # Avoid paged reengraving on height-only resize
 
+**Summary:** Keep the existing musical notation layout when only pane height changes so vertical resizing does not rebuild every page.
+
 **Source:** `plugins/scoreview/product/draxul-scoreview/src/score_runtime.cpp`  
 **Priority/evidence:** P2; static, high confidence. **Reported by:** Codex; Claude found adjacent layout work. Lines 347–352 dirty layout for any size change, while engraving options at 574–580 depend on width, scale, and zoom. Lines 582–633 render and interpret each page after invalidation.
 
