@@ -5,7 +5,14 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cctype>
+#include <cerrno>
+#include <charconv>
 #include <cmath>
+#include <cstdint>
+#include <cstdlib>
+#include <limits>
+#include <system_error>
 
 namespace draxul
 {
@@ -54,6 +61,110 @@ void push_hand_pass(PlayerModel::HandTally& hand, bool dirty)
         hand.recent_passes.erase(hand.recent_passes.begin());
     hand.consecutive_clean = dirty ? 0 : hand.consecutive_clean + 1;
     ++hand.pass_count;
+}
+
+// Saved progress is untrusted: a syntactically valid file can still carry
+// wrong-typed fields or malformed numeric keys. Every read below validates
+// the type and range and throws ProgressFormatError otherwise, so
+// deserialize() can reject the whole record without publishing partial state.
+struct ProgressFormatError
+{
+};
+
+const json& require_object(const json& value)
+{
+    if (!value.is_object())
+        throw ProgressFormatError();
+    return value;
+}
+
+double finite_number(const json& value)
+{
+    if (!value.is_number())
+        throw ProgressFormatError();
+    const double number = value.get<double>();
+    if (!std::isfinite(number))
+        throw ProgressFormatError();
+    return number;
+}
+
+double read_double(const json& object, const char* key, double fallback)
+{
+    const auto found = object.find(key);
+    return found == object.end() ? fallback : finite_number(*found);
+}
+
+// Non-negative int counter/day field, range-checked before narrowing (a
+// float or out-of-range integer must not reach a static_cast to int).
+int read_count(const json& object, const char* key, int fallback)
+{
+    const auto found = object.find(key);
+    if (found == object.end())
+        return fallback;
+    if (found->is_number_unsigned())
+    {
+        const auto value = found->get<std::uint64_t>();
+        if (value > static_cast<std::uint64_t>(std::numeric_limits<int>::max()))
+            throw ProgressFormatError();
+        return static_cast<int>(value);
+    }
+    if (found->is_number_integer())
+    {
+        const auto value = found->get<std::int64_t>();
+        if (value < 0 || value > std::numeric_limits<int>::max())
+            throw ProgressFormatError();
+        return static_cast<int>(value);
+    }
+    throw ProgressFormatError();
+}
+
+std::string read_string(const json& object, const char* key, const std::string& fallback)
+{
+    const auto found = object.find(key);
+    if (found == object.end())
+        return fallback;
+    if (!found->is_string())
+        throw ProgressFormatError();
+    return found->get<std::string>();
+}
+
+void read_passes(const json& object, const char* key, std::vector<uint8_t>& out)
+{
+    const auto found = object.find(key);
+    if (found == object.end())
+        return;
+    if (!found->is_array())
+        throw ProgressFormatError();
+    for (const auto& pass : *found)
+    {
+        if (!pass.is_number_integer())
+            throw ProgressFormatError();
+        out.push_back(pass.get<std::int64_t>() != 0 ? uint8_t{ 1 } : uint8_t{ 0 });
+    }
+}
+
+int parse_int_key(const std::string& key)
+{
+    int value = 0;
+    const char* first = key.data();
+    const char* last = first + key.size();
+    const auto [ptr, ec] = std::from_chars(first, last, value);
+    if (key.empty() || ec != std::errc() || ptr != last)
+        throw ProgressFormatError();
+    return value;
+}
+
+double parse_double_key(const std::string& key)
+{
+    // qstamp_key() writes "%.4f"; read it back with the matching C parser.
+    if (key.empty() || std::isspace(static_cast<unsigned char>(key.front())))
+        throw ProgressFormatError();
+    errno = 0;
+    char* end = nullptr;
+    const double value = std::strtod(key.c_str(), &end);
+    if (errno == ERANGE || end != key.c_str() + key.size() || !std::isfinite(value))
+        throw ProgressFormatError();
+    return value;
 }
 
 } // namespace
@@ -492,151 +603,154 @@ bool PlayerModel::deserialize(const std::string& json_text)
     if (doc.is_discarded() || !doc.is_object())
         return false;
 
-    pitch_.clear();
-    onset_.clear();
-    chord_.clear();
-    bar_tally_.clear();
-    sessions_.clear();
-
-    if (const auto piece = doc.find("piece"); piece != doc.end() && piece->is_object())
+    // Restore into a scratch copy and publish it only once every field has
+    // validated: a well-formed file with a wrong-typed field or a malformed
+    // numeric key must leave this model exactly as it was (the caller then
+    // keeps its fresh session) rather than throwing half way through.
+    PlayerModel next = *this;
+    next.pitch_.clear();
+    next.onset_.clear();
+    next.chord_.clear();
+    next.bar_tally_.clear();
+    next.sessions_.clear();
+    try
     {
-        title_ = piece->value("title", title_);
-        marking_qpm_ = piece->value("marking_qpm", marking_qpm_);
-        quarters_per_bar_ = piece->value("quarters_per_bar", quarters_per_bar_);
-    }
-    if (const auto tempo = doc.find("tempo"); tempo != doc.end() && tempo->is_object())
-    {
-        best_tempo_frac_ = tempo->value("best_frac", 0.0);
-        last_tempo_frac_ = tempo->value("last_frac", 0.0);
-    }
-    total_notes_ = doc.value("total_notes", 0);
-
-    if (const auto sessions = doc.find("sessions"); sessions != doc.end() && sessions->is_array())
-    {
-        for (const json& entry : *sessions)
+        if (const auto piece = doc.find("piece"); piece != doc.end())
         {
-            Session session;
-            session.start_iso = entry.value("start", "");
-            session.seconds = entry.value("seconds", 0);
-            session.notes = entry.value("notes", 0);
-            session.end_tempo_frac = entry.value("end_tempo_frac", 0.0);
-            sessions_.push_back(std::move(session));
+            const json& p = require_object(*piece);
+            next.title_ = read_string(p, "title", next.title_);
+            next.marking_qpm_ = read_double(p, "marking_qpm", next.marking_qpm_);
+            next.quarters_per_bar_ = read_double(p, "quarters_per_bar", next.quarters_per_bar_);
+            if (!(next.quarters_per_bar_ > 0.0))
+                throw ProgressFormatError();
         }
-    }
-    if (const auto pitch = doc.find("pitch"); pitch != doc.end() && pitch->is_object())
-    {
-        for (const auto& [key, value] : pitch->items())
+        next.best_tempo_frac_ = 0.0;
+        next.last_tempo_frac_ = 0.0;
+        if (const auto tempo = doc.find("tempo"); tempo != doc.end())
         {
-            PitchStats stats;
-            stats.hit = value.value("hit", 0);
-            stats.miss = value.value("miss", 0);
-            stats.wrong_near = value.value("wrong_near", 0);
-            stats.timing.samples = value.value("dt_n", 0);
-            stats.timing.mean_q = value.value("dt_mean_q", 0.0);
-            stats.timing.m2_q = value.value("dt_m2", 0.0);
-            pitch_[std::stoi(key)] = std::move(stats);
+            const json& t = require_object(*tempo);
+            next.best_tempo_frac_ = read_double(t, "best_frac", 0.0);
+            next.last_tempo_frac_ = read_double(t, "last_frac", 0.0);
         }
-    }
-    if (const auto onset = doc.find("onset"); onset != doc.end() && onset->is_object())
-    {
-        for (const auto& [key, value] : onset->items())
+        next.total_notes_ = read_count(doc, "total_notes", 0);
+
+        if (const auto sessions = doc.find("sessions"); sessions != doc.end())
         {
-            OnsetStats stats;
-            stats.hit = value.value("hit", 0);
-            stats.miss = value.value("miss", 0);
-            stats.timing.samples = value.value("dt_n", 0);
-            stats.timing.mean_q = value.value("dt_mean_q", 0.0);
-            stats.timing.m2_q = value.value("dt_m2", 0.0);
-            if (const auto recent = value.find("recent");
-                recent != value.end() && recent->is_array())
+            if (!sessions->is_array())
+                throw ProgressFormatError();
+            for (const json& item : *sessions)
             {
-                for (const json& q : *recent)
-                    stats.recent.push_back(q.get<double>());
+                const json& entry = require_object(item);
+                Session session;
+                session.start_iso = read_string(entry, "start", "");
+                session.seconds = read_count(entry, "seconds", 0);
+                session.notes = read_count(entry, "notes", 0);
+                session.end_tempo_frac = read_double(entry, "end_tempo_frac", 0.0);
+                next.sessions_.push_back(std::move(session));
             }
-            onset_[std::stod(key)] = std::move(stats);
         }
-    }
-    if (const auto chord = doc.find("chord"); chord != doc.end() && chord->is_object())
-    {
-        for (const auto& [key, value] : chord->items())
+        if (const auto pitch = doc.find("pitch"); pitch != doc.end())
         {
-            ChordStats stats;
-            stats.clean = value.value("clean", 0);
-            stats.split = value.value("split", 0);
-            stats.miss = value.value("miss", 0);
-            chord_[key] = stats;
-        }
-    }
-    if (const auto bars = doc.find("bars"); bars != doc.end() && bars->is_object())
-    {
-        for (const auto& [key, value] : bars->items())
-        {
-            BarTally tally;
-            tally.hit = value.value("hit", 0);
-            tally.miss = value.value("miss", 0);
-            tally.left.hit = value.value("lh_hit", 0);
-            tally.left.miss = value.value("lh_miss", 0);
-            tally.right.hit = value.value("rh_hit", 0);
-            tally.right.miss = value.value("rh_miss", 0);
-            if (const auto passes = value.find("lh_passes");
-                passes != value.end() && passes->is_array())
+            for (const auto& [key, item] : require_object(*pitch).items())
             {
-                for (const auto& pass : *passes)
+                const json& value = require_object(item);
+                PitchStats stats;
+                stats.hit = read_count(value, "hit", 0);
+                stats.miss = read_count(value, "miss", 0);
+                stats.wrong_near = read_count(value, "wrong_near", 0);
+                stats.timing.samples = read_count(value, "dt_n", 0);
+                stats.timing.mean_q = read_double(value, "dt_mean_q", 0.0);
+                stats.timing.m2_q = read_double(value, "dt_m2", 0.0);
+                next.pitch_[parse_int_key(key)] = std::move(stats);
+            }
+        }
+        if (const auto onset = doc.find("onset"); onset != doc.end())
+        {
+            for (const auto& [key, item] : require_object(*onset).items())
+            {
+                const json& value = require_object(item);
+                OnsetStats stats;
+                stats.hit = read_count(value, "hit", 0);
+                stats.miss = read_count(value, "miss", 0);
+                stats.timing.samples = read_count(value, "dt_n", 0);
+                stats.timing.mean_q = read_double(value, "dt_mean_q", 0.0);
+                stats.timing.m2_q = read_double(value, "dt_m2", 0.0);
+                if (const auto recent = value.find("recent"); recent != value.end())
                 {
-                    if (pass.is_number_integer())
-                        tally.left.recent_passes.push_back(
-                            pass.get<int>() != 0 ? uint8_t{ 1 } : uint8_t{ 0 });
+                    if (!recent->is_array())
+                        throw ProgressFormatError();
+                    for (const json& q : *recent)
+                        stats.recent.push_back(finite_number(q));
                 }
+                next.onset_[parse_double_key(key)] = std::move(stats);
             }
-            tally.left.consecutive_clean = value.value("lh_clean_streak", 0);
-            tally.left.pass_count = value.value("lh_pass_count", 0);
-            if (const auto passes = value.find("rh_passes");
-                passes != value.end() && passes->is_array())
-            {
-                for (const auto& pass : *passes)
-                {
-                    if (pass.is_number_integer())
-                        tally.right.recent_passes.push_back(
-                            pass.get<int>() != 0 ? uint8_t{ 1 } : uint8_t{ 0 });
-                }
-            }
-            tally.right.consecutive_clean = value.value("rh_clean_streak", 0);
-            tally.right.pass_count = value.value("rh_pass_count", 0);
-            if (const auto passes = value.find("passes");
-                passes != value.end() && passes->is_array())
-            {
-                for (const auto& pass : *passes)
-                {
-                    if (pass.is_number_integer())
-                        tally.recent_passes.push_back(
-                            pass.get<int>() != 0 ? uint8_t{ 1 } : uint8_t{ 0 });
-                }
-            }
-            tally.consecutive_clean = value.value("clean_streak", 0);
-            tally.pass_count = value.value("pass_count", 0);
-            tally.ladder_frac = value.value("ladder", 0.0);
-            tally.last_pass_day = value.value("last_day", 0);
-            tally.spaced_streak = value.value("spaced_streak", 0);
-            bar_tally_[std::stoi(key)] = tally;
         }
+        if (const auto chord = doc.find("chord"); chord != doc.end())
+        {
+            for (const auto& [key, item] : require_object(*chord).items())
+            {
+                const json& value = require_object(item);
+                ChordStats stats;
+                stats.clean = read_count(value, "clean", 0);
+                stats.split = read_count(value, "split", 0);
+                stats.miss = read_count(value, "miss", 0);
+                next.chord_[key] = stats;
+            }
+        }
+        if (const auto bars = doc.find("bars"); bars != doc.end())
+        {
+            for (const auto& [key, item] : require_object(*bars).items())
+            {
+                const json& value = require_object(item);
+                BarTally tally;
+                tally.hit = read_count(value, "hit", 0);
+                tally.miss = read_count(value, "miss", 0);
+                tally.left.hit = read_count(value, "lh_hit", 0);
+                tally.left.miss = read_count(value, "lh_miss", 0);
+                tally.right.hit = read_count(value, "rh_hit", 0);
+                tally.right.miss = read_count(value, "rh_miss", 0);
+                read_passes(value, "lh_passes", tally.left.recent_passes);
+                tally.left.consecutive_clean = read_count(value, "lh_clean_streak", 0);
+                tally.left.pass_count = read_count(value, "lh_pass_count", 0);
+                read_passes(value, "rh_passes", tally.right.recent_passes);
+                tally.right.consecutive_clean = read_count(value, "rh_clean_streak", 0);
+                tally.right.pass_count = read_count(value, "rh_pass_count", 0);
+                read_passes(value, "passes", tally.recent_passes);
+                tally.consecutive_clean = read_count(value, "clean_streak", 0);
+                tally.pass_count = read_count(value, "pass_count", 0);
+                tally.ladder_frac = read_double(value, "ladder", 0.0);
+                tally.last_pass_day = read_count(value, "last_day", 0);
+                tally.spaced_streak = read_count(value, "spaced_streak", 0);
+                next.bar_tally_[parse_int_key(key)] = tally;
+            }
+        }
+
+        // Preserve fields this build doesn't understand (newer schema data).
+        json extra = doc;
+        for (const char* known : { "version", "piece", "tempo", "total_notes", "sessions",
+                 "pitch", "onset", "chord", "bars" })
+            extra.erase(known);
+        next.extra_json_ = extra.empty() ? std::string() : extra.dump();
+    }
+    catch (const ProgressFormatError&)
+    {
+        return false;
+    }
+    catch (const json::exception&)
+    {
+        return false;
     }
 
-    // Preserve fields this build doesn't understand (newer schema data).
-    json extra = doc;
-    for (const char* known : { "version", "piece", "tempo", "total_notes", "sessions",
-             "pitch", "onset", "chord", "bars" })
-        extra.erase(known);
-    extra_json_ = extra.empty() ? std::string() : extra.dump();
-
-    session_active_ = false;
-    session_notes_ = 0;
-    open_pass_bar_ = -1;
-    open_pass_dirty_ = false;
-    open_pass_outcomes_ = 0;
-    open_pass_left_seen_ = false;
-    open_pass_left_dirty_ = false;
-    open_pass_right_seen_ = false;
-    open_pass_right_dirty_ = false;
+    next.session_active_ = false;
+    next.session_notes_ = 0;
+    next.open_pass_bar_ = -1;
+    next.open_pass_dirty_ = false;
+    next.open_pass_outcomes_ = 0;
+    next.open_pass_left_seen_ = false;
+    next.open_pass_left_dirty_ = false;
+    next.open_pass_right_seen_ = false;
+    next.open_pass_right_dirty_ = false;
+    *this = std::move(next);
     return true;
 }
 

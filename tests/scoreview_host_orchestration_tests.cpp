@@ -849,4 +849,23 @@ TEST_CASE("the session controller survives a corrupt progress file",
         session.attach_source(progress_dir.path, source_bytes);
         CHECK(session.model().sessions().size() == 1); // the fresh record took over
     }
+
+    // Well-formed JSON with wrong-typed fields or malformed numeric keys must
+    // also start fresh rather than throwing out of attach_source.
+    for (const char* bad : { R"({"total_notes": "lots", "sessions": [{"notes": 4}]})",
+             R"({"sessions": [{"notes": 4}], "pitch": {"middle-c": {"hit": 1}}})" })
+    {
+        INFO(bad);
+        {
+            std::ofstream corrupt(stored_file, std::ios::binary | std::ios::trunc);
+            corrupt << bad;
+        }
+        ScoreSessionController session;
+        REQUIRE_NOTHROW(session.attach_source(progress_dir.path, source_bytes));
+        CHECK(session.attached());
+        CHECK(session.model().total_notes_judged() == 0);
+        CHECK(session.model().sessions().empty());
+        CHECK(session.model().pitch_stats().empty());
+        REQUIRE(session.begin_session());
+    }
 }

@@ -158,6 +158,59 @@ TEST_CASE("player model rejects corrupt JSON without crashing", "[scoreview][pla
     CHECK(model.total_notes_judged() == 0);
 }
 
+TEST_CASE("player model rejects well-formed progress with invalid fields atomically",
+    "[scoreview][player-model]")
+{
+    // A model with real state: a rejected record must leave every bit of it
+    // untouched (no exception, no partially cleared or half-restored maps).
+    PlayerModel model;
+    model.set_piece("Walz", 130.0, 3.0);
+    model.begin_session("2026-07-13T10:00:00Z");
+    model.apply(hit(0.5, 60, 0.0, 1.0));
+    model.apply(miss(1.5, 64));
+    model.end_session(60, 0.8);
+    const std::string before = model.serialize();
+
+    const char* const invalid[] = {
+        R"({"total_notes": "five"})", // wrong scalar type
+        R"({"total_notes": 1e300})", // float where a count belongs
+        R"({"total_notes": 99999999999})", // out of int range
+        R"({"total_notes": -3})", // negative count
+        R"({"pitch": {"sixty": {"hit": 1}}})", // non-numeric int key
+        R"({"pitch": {"60x": {"hit": 1}}})", // trailing garbage in key
+        R"({"pitch": {"99999999999": {"hit": 1}}})", // key out of int range
+        R"({"pitch": {"60": 5}})", // entry not an object
+        R"({"pitch": {"60": {"hit": "many"}}})", // wrong field type
+        R"({"pitch": []})", // section not an object
+        R"({"onset": {"half": {"hit": 1}}})", // non-numeric double key
+        R"({"onset": {"0.5000": {"recent": ["good"]}}})", // wrong array element
+        R"({"onset": {"0.5000": {"recent": 1}}})", // recent not an array
+        R"({"bars": {"x": {"hit": 1}}})", // invalid bar key
+        R"({"bars": {"0": {"passes": [1, "y"]}}})", // wrong pass element
+        R"({"bars": {"0": {"ladder": "high"}}})", // wrong double type
+        R"({"sessions": [{"start": 7}]})", // wrong session field type
+        R"({"sessions": [3]})", // session not an object
+        R"({"sessions": {}})", // sessions not an array
+        R"({"piece": {"quarters_per_bar": 0}})", // degenerate bar length
+        R"({"piece": {"title": 12}})", // wrong title type
+        R"({"tempo": "fast"})", // section not an object
+        R"({"chord": {"60+64": {"clean": true}}})", // bool where a count belongs
+    };
+    for (const char* text : invalid)
+    {
+        INFO(text);
+        bool restored = true;
+        REQUIRE_NOTHROW(restored = model.deserialize(text));
+        CHECK_FALSE(restored);
+        CHECK(model.serialize() == before);
+    }
+
+    // Valid progress still round-trips after the rejected attempts.
+    PlayerModel reloaded;
+    REQUIRE(reloaded.deserialize(before));
+    CHECK(reloaded.serialize() == before);
+}
+
 TEST_CASE("progress store hashes, saves atomically, and loads", "[scoreview][player-model]")
 {
     draxul::tests::TempDir dir("scoreview-progress");
