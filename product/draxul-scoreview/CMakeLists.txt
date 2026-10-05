@@ -57,6 +57,7 @@ add_library(draxul-scoreview-runtime STATIC
     src/analysis_overlay_draw.cpp
     src/keyboard_render_nvg.cpp
     src/mic_player_input.cpp
+    src/module_retaining_thread.cpp
     src/score_audio_controller.cpp
     src/score_device_lease.cpp
     src/score_presentation.cpp
@@ -84,7 +85,7 @@ target_link_libraries(draxul-scoreview-runtime PUBLIC
     draxul-score-canvas
     draxul-score-runtime-support
     ${DRAXUL_SCOREVIEW_IMGUI_TARGET}
-    PRIVATE ${DRAXUL_SCOREVIEW_SDL_TARGET} imgui
+    PRIVATE ${DRAXUL_SCOREVIEW_SDL_TARGET} imgui ${CMAKE_DL_LIBS}
 )
 
 # Microphone permission pre-flight: TCC via AVFoundation on macOS (SDL must

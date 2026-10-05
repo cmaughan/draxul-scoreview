@@ -2,15 +2,31 @@
 
 #include <draxul/scoreview/mic_player_input.h>
 
+#include "support/retaining_thread_module.h"
+
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <vector>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
 
 using namespace draxul::scoreview;
 using namespace std::chrono_literals;
@@ -618,3 +634,90 @@ TEST_CASE("microphone repeated construction and destruction has balanced stream 
         check_clean_destroy(counts);
     }
 }
+
+#ifdef DRAXUL_SCOREVIEW_RETAINING_MODULE_PATH
+namespace
+{
+
+// Platform loader seam for the module-unload test: the same primitives the
+// core PluginManager uses to load and release plugin modules.
+#ifdef _WIN32
+std::wstring native_path(const char* path)
+{
+    // The loader wants backslashes; CMake generator paths use forward ones.
+    return std::filesystem::path(path).make_preferred().wstring();
+}
+#endif
+
+void* load_module(const char* path)
+{
+#ifdef _WIN32
+    return LoadLibraryW(native_path(path).c_str());
+#else
+    return dlopen(path, RTLD_NOW | RTLD_LOCAL);
+#endif
+}
+
+void* module_symbol(void* module, const char* name)
+{
+#ifdef _WIN32
+    return reinterpret_cast<void*>(GetProcAddress(static_cast<HMODULE>(module), name));
+#else
+    return dlsym(module, name);
+#endif
+}
+
+void unload_module(void* module)
+{
+#ifdef _WIN32
+    FreeLibrary(static_cast<HMODULE>(module));
+#else
+    dlclose(module);
+#endif
+}
+
+bool module_is_loaded(const char* path)
+{
+#ifdef _WIN32
+    return GetModuleHandleW(native_path(path).c_str()) != nullptr;
+#else
+    void* probe = dlopen(path, RTLD_NOW | RTLD_NOLOAD);
+    if (probe == nullptr)
+        return false;
+    dlclose(probe);
+    return true;
+#endif
+}
+
+} // namespace
+
+TEST_CASE("microphone opener code stays loaded until its worker leaves the module",
+    "[scoreview][microphone][lifetime][module]")
+{
+    // The microphone opener is a detached worker inside the plugin module.
+    // The host releases the module after destroying the instance (quitting
+    // during a consent prompt), so the worker must hold its own module
+    // reference and drop it only once no module frame remains on its stack.
+    const char* path = DRAXUL_SCOREVIEW_RETAINING_MODULE_PATH;
+    REQUIRE_FALSE(module_is_loaded(path));
+    void* module = load_module(path);
+    REQUIRE(module != nullptr);
+    auto start = reinterpret_cast<ScoreviewRetainingStartFn>(
+        module_symbol(module, SCOREVIEW_RETAINING_START_SYMBOL));
+    REQUIRE(start != nullptr);
+
+    ScoreviewRetainingGate gate;
+    start(&gate);
+    REQUIRE(wait_until([&gate]() { return gate.entered.load(); }));
+
+    // The host's release while the worker is parked inside module code.
+    unload_module(module);
+    CHECK(module_is_loaded(path)); // the worker's reference keeps it mapped
+
+    gate.released.store(true);
+    REQUIRE(wait_until([&gate]() { return gate.finished.load(); }));
+    // Once the worker has fully left the module, its reference is released
+    // exactly once and the loader can unmap the image (no permanent pin).
+    CHECK(wait_until([path]() { return !module_is_loaded(path); }));
+}
+#endif

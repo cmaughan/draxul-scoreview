@@ -29,7 +29,21 @@ draxul_add_test_target(
 # loading executable. This test executable is its own host, so it must link
 # the SDL archive itself.
 target_link_libraries(draxul-test-scoreview-runtime PRIVATE
-    draxul-scoreview-runtime-test-internals SDL3::SDL3)
+    draxul-scoreview-runtime-test-internals SDL3::SDL3 ${CMAKE_DL_LIBS})
+
+# A tiny loadable module hosting a module-retaining worker, so the microphone
+# lifetime suite can unload real module code while that worker still runs it.
+# It carries no ScoreView/SDL/ObjC dependencies, keeping it unloadable.
+add_library(draxul-scoreview-test-retaining-module MODULE
+    "${_scoreview_root}/tests/support/retaining_thread_module.cpp"
+    "${_scoreview_root}/product/draxul-scoreview/src/module_retaining_thread.cpp")
+target_include_directories(draxul-scoreview-test-retaining-module PRIVATE
+    "${_scoreview_root}/tests"
+    "${_scoreview_root}/product/draxul-scoreview/src")
+target_link_libraries(draxul-scoreview-test-retaining-module PRIVATE ${CMAKE_DL_LIBS})
+add_dependencies(draxul-test-scoreview-runtime draxul-scoreview-test-retaining-module)
+target_compile_definitions(draxul-test-scoreview-runtime PRIVATE
+    DRAXUL_SCOREVIEW_RETAINING_MODULE_PATH="$<TARGET_FILE:draxul-scoreview-test-retaining-module>")
 
 foreach(_target draxul-test-scoreview draxul-test-scoreview-runtime)
     target_include_directories(${_target} PRIVATE "${_scoreview_root}/tests")

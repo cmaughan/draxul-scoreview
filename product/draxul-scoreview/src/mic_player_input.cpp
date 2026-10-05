@@ -1,6 +1,7 @@
 #include <draxul/scoreview/mic_player_input.h>
 
 #include "mic_permission.h"
+#include "module_retaining_thread.h"
 
 #include <draxul/log.h>
 
@@ -8,7 +9,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <thread>
 
 namespace draxul
 {
@@ -119,8 +119,11 @@ MicPlayerInput::MicPlayerInput(const FlowController& flow, ListenerTuning tuning
         return;
     }
     // The opener owns its own reference to Shared, so a pending consent
-    // dialog can never dangle or hang shutdown.
-    std::thread([s = shared_]() {
+    // dialog can never dangle or hang shutdown. It also owns a reference to
+    // the plugin module that contains this code: the host may unload the
+    // module while the opener still waits on consent or a device call, and
+    // the reference is dropped only once the thread has left module code.
+    start_module_retaining_thread([s = shared_]() {
         const auto abandoned = [&s]() {
             std::lock_guard lock(s->mutex);
             return s->lifecycle == Shared::Lifecycle::Abandoned;
@@ -214,7 +217,7 @@ MicPlayerInput::MicPlayerInput(const FlowController& flow, ListenerTuning tuning
         {
             s->ops->destroy(stream);
         }
-    }).detach();
+    });
 }
 
 MicPlayerInput::~MicPlayerInput()
@@ -231,7 +234,8 @@ MicPlayerInput::~MicPlayerInput()
     if (stream != nullptr)
         ops->destroy(stream);
     // Never join: an undecided permission callback may outlive the host. It
-    // owns only Shared and will observe Abandoned before publishing anything.
+    // owns only Shared (plus its module reference) and will observe Abandoned
+    // before publishing anything.
 }
 
 MicPlayerInput::State MicPlayerInput::state() const
