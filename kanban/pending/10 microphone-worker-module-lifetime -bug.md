@@ -13,7 +13,8 @@
 - [x] **Fix:** Preserve asynchronous consent/device handling and avoid unbounded interface-thread joins.
 - [x] **Acceptance:** Controlled shutdown during pending permission cannot resume into unloaded module code.
 - [x] **Acceptance:** Abandoned opening/resuming operations clean up exactly once and ordinary input remains functional.
-- [x] **Validation:** Run the ScoreView-scoped aggregate and same-cache smoke; verify the macOS permission/shutdown path and inspect Windows lifetime behavior.
+- [x] **Validation:** Run the ScoreView-scoped aggregate and same-cache smoke; inspect Windows lifetime behavior (code review plus the retained-module test).
+- [ ] **Validation:** Manually quit during a pending microphone permission prompt and confirm no crash — on Windows, where the plugin library is actually unloaded (macOS keeps the Objective-C plugin loaded). Not yet run; the session was headless.
 
 ## Resolution
 
