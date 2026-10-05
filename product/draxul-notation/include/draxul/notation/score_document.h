@@ -163,6 +163,11 @@ struct Note
 
 struct KeySignature
 {
+    // Supported circle-of-fifths range: up to seven sharps or flats (the
+    // conventional key signatures). The importer rejects anything outside.
+    static constexpr int kMinFifths = -7;
+    static constexpr int kMaxFifths = 7;
+
     int fifths = 0; // circle-of-fifths position: sharps > 0, flats < 0
 };
 

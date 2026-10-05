@@ -10,6 +10,8 @@
 #include <draxul/scoreview/score_timemap.h>
 #include <draxul/scoreview/verovio_layout_engine.h>
 
+#include <limits>
+#include <optional>
 #include <string>
 
 using namespace draxul::scoreview;
@@ -94,6 +96,37 @@ const PieceProfile& grieg_profile()
 }
 
 } // namespace
+
+TEST_CASE("analysis signature prior is safe for any notated fifths value",
+    "[scoreview][analysis][key-signature]")
+{
+    // An evenly chromatic piece correlates equally with every key, so the
+    // notated-signature prior alone picks the tonic — exposing its math.
+    std::vector<AnalysisOnset> onsets;
+    for (int i = 0; i < 8; ++i)
+        onsets.push_back(at(static_cast<double>(i),
+            { 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71 }));
+    const auto tonic_for = [&onsets](std::optional<int> fifths) {
+        const PieceProfile profile = analyze_piece(onsets, 4.0, fifths);
+        CHECK_FALSE(profile.global_key.minor);
+        return profile.global_key.tonic_pc;
+    };
+
+    // Ordinary signatures keep their expected prior (major tonic 7*fifths).
+    CHECK(tonic_for(0) == 0); // C
+    CHECK(tonic_for(1) == 7); // G
+    CHECK(tonic_for(4) == 4); // E
+    CHECK(tonic_for(7) == 1); // C#
+    CHECK(tonic_for(-1) == 5); // F
+    CHECK(tonic_for(-7) == 11); // Cb
+
+    // Values whose 7x product overflows int still land on the pitch class
+    // their circle-of-fifths position implies (fifths mod 12).
+    CHECK(tonic_for(1 << 30) == tonic_for(4)); // 2^30 = 4 (mod 12)
+    CHECK(tonic_for(std::numeric_limits<int>::max()) == tonic_for(7));
+    CHECK(tonic_for(std::numeric_limits<int>::min()) == tonic_for(4));
+    CHECK(tonic_for(-(1 << 30)) == tonic_for(-4));
+}
 
 TEST_CASE("analysis finds the key of a scale", "[scoreview][analysis]")
 {

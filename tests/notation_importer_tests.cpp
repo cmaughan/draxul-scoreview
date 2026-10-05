@@ -2,8 +2,10 @@
 
 #include <draxul/notation/musicxml_importer.h>
 
+#include <initializer_list>
 #include <set>
 #include <string>
+#include <utility>
 
 using namespace draxul::notation;
 
@@ -101,6 +103,48 @@ TEST_CASE("imports a single note with header metadata", "[notation]")
     CHECK(note.duration == Fraction::of(1, 1));
     CHECK(note.voice == 1);
     CHECK(note.staff == 1);
+}
+
+TEST_CASE("imported key signatures outside the supported range are rejected with a warning",
+    "[notation][key-signature]")
+{
+    const auto import_key = [](const std::string& fifths_xml) {
+        return import_ok(wrap_score(R"(
+      <measure number="1">
+        <attributes><divisions>1</divisions><key>)"
+            + fifths_xml + R"(</key></attributes>
+        <note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration></note>
+      </measure>)"));
+    };
+
+    // Ordinary signatures (and a <key> without <fifths>) keep their value.
+    for (const auto& [xml, expected] : std::initializer_list<std::pair<std::string, int>>{
+             { "<fifths>-7</fifths>", -7 }, { "<fifths>7</fifths>", 7 },
+             { "<fifths> 3 </fifths>", 3 }, { "<fifths>+2</fifths>", 2 },
+             { "<fifths>0</fifths>", 0 }, { "<mode>major</mode>", 0 } })
+    {
+        INFO(xml);
+        const auto result = import_key(xml);
+        CHECK(result.warnings.empty());
+        const Measure& measure = result.document.parts.at(0).measures.at(0);
+        REQUIRE(measure.key.has_value());
+        CHECK(measure.key->fifths == expected);
+    }
+
+    // Extreme, unrepresentable, or malformed values never reach the model.
+    for (const char* xml : { "<fifths>2147483647</fifths>", "<fifths>-2147483648</fifths>",
+             "<fifths>99999999999999999999</fifths>", "<fifths>8</fifths>",
+             "<fifths>-8</fifths>", "<fifths>3x</fifths>", "<fifths>sharp</fifths>",
+             "<fifths>+-3</fifths>", "<fifths>1.5</fifths>" })
+    {
+        INFO(xml);
+        const auto result = import_key(xml);
+        const Measure& measure = result.document.parts.at(0).measures.at(0);
+        CHECK_FALSE(measure.key.has_value());
+        REQUIRE(result.warnings.size() == 1);
+        CHECK(result.warnings[0].find("unsupported key signature") != std::string::npos);
+        CHECK(result.warnings[0].find("measure 1") != std::string::npos);
+    }
 }
 
 TEST_CASE("divisions changes mid-file keep durations exact", "[notation]")

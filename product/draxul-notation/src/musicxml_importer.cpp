@@ -3,10 +3,13 @@
 #include <tinyxml2.h>
 
 #include <cctype>
+#include <charconv>
 #include <cmath>
 #include <cstring>
 #include <fstream>
 #include <sstream>
+#include <string>
+#include <system_error>
 
 namespace draxul
 {
@@ -256,6 +259,36 @@ private:
         return measure;
     }
 
+    // A <key> with a missing <fifths> is the conventional C major/A minor
+    // default. A present value must be a plain integer inside the supported
+    // range; anything else (including values that do not fit an int) is
+    // reported and leaves the measure without a key change, so downstream
+    // analysis never sees an unsupported signature.
+    void parse_key(const XMLElement* key, Measure& measure)
+    {
+        const std::string text = trim(child_text(key, "fifths"));
+        if (text.empty())
+        {
+            measure.key = KeySignature{};
+            return;
+        }
+        long long fifths = 0;
+        const char* first = text.data();
+        const char* last = first + text.size();
+        if (*first == '+' && last - first > 1 && first[1] != '-')
+            ++first; // from_chars rejects an explicit plus sign
+        const auto [ptr, ec] = std::from_chars(first, last, fifths);
+        if (ec != std::errc() || ptr != last || fifths < KeySignature::kMinFifths
+            || fifths > KeySignature::kMaxFifths)
+        {
+            warn("ignoring unsupported key signature <fifths>" + text + "</fifths> (supported range "
+                + std::to_string(KeySignature::kMinFifths) + ".."
+                + std::to_string(KeySignature::kMaxFifths) + ")");
+            return;
+        }
+        measure.key = KeySignature{ static_cast<int>(fifths) };
+    }
+
     void parse_attributes(const XMLElement* attributes, Part& part, Measure& measure)
     {
         const int divisions = child_int(attributes, "divisions", 0);
@@ -265,7 +298,7 @@ private:
             warn("ignoring invalid <divisions> value '" + child_text(attributes, "divisions") + "'");
 
         if (const XMLElement* key = attributes->FirstChildElement("key"))
-            measure.key = KeySignature{ child_int(key, "fifths", 0) };
+            parse_key(key, measure);
 
         if (const XMLElement* time = attributes->FirstChildElement("time"))
         {

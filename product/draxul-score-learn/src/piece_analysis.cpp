@@ -60,7 +60,11 @@ PieceProfile::KeyEstimate estimate_key(
     int prior_minor_pc = -1;
     if (notated_fifths.has_value())
     {
-        prior_major_pc = ((*notated_fifths * 7) % 12 + 12) % 12;
+        // Reduce to a pitch class BEFORE multiplying: a fifth is 7
+        // semitones, and 7 * fifths overflows int for large inputs. The
+        // importer rejects unsupported signatures, but this stays total for
+        // any caller-supplied value.
+        prior_major_pc = (((*notated_fifths % 12) * 7) % 12 + 12) % 12;
         prior_minor_pc = (prior_major_pc + 9) % 12;
     }
 
