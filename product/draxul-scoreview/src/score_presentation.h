@@ -17,6 +17,8 @@
 #include <draxul/scoreview/score_highlight.h>
 #include <draxul/scoreview/stream_program.h>
 
+#include <algorithm>
+#include <cmath>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -27,6 +29,22 @@ namespace draxul
 {
 namespace scoreview
 {
+
+// Height of a score band that wants `desired_px`, prefers at least
+// `min_px`, and must stay within 90% of a `viewport_h`-pixel pane. In a
+// short pane the ceiling wins over the floor (a band taller than the pane
+// would draw outside it), so the bounds handed to the clamp are always
+// ordered; a zero/negative/non-finite pane yields an empty band.
+inline float fit_score_band_height(float desired_px, float min_px, float viewport_h)
+{
+    if (!std::isfinite(viewport_h) || viewport_h <= 0.0f)
+        return 0.0f;
+    const float max_h = viewport_h * 0.9f;
+    const float min_h = std::isfinite(min_px) ? std::clamp(min_px, 0.0f, max_h) : 0.0f;
+    if (!std::isfinite(desired_px))
+        return min_h;
+    return std::clamp(desired_px, min_h, max_h);
+}
 
 class ScorePresentation
 {

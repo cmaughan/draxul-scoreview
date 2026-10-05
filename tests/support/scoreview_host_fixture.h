@@ -209,6 +209,17 @@ public:
         return host.input_lease_ != nullptr;
     }
 
+    // The flow band geometry shared by draw() and print_hint().
+    static auto flow_band(const ScoreHost& host)
+    {
+        return host.flow_band();
+    }
+
+    static void set_zoom(ScoreHost& host, float zoom)
+    {
+        host.set_zoom(zoom);
+    }
+
     static void relayout_paged(ScoreHost& host, int width = 800, int height = 600)
     {
         host.viewport_.pixel_size = { width, height };

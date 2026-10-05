@@ -399,7 +399,7 @@ ScoreRuntime::FlowBand ScoreRuntime::flow_band() const
 {
     const float vh = static_cast<float>(viewport_.pixel_size.y);
     FlowBand band;
-    band.target_h = std::clamp(vh * 0.35f * zoom_, 96.0f * ui_scale(), vh * 0.9f);
+    band.target_h = fit_score_band_height(vh * 0.35f * zoom_, 96.0f * ui_scale(), vh);
     band.strip_y = (vh - band.target_h) * 0.5f;
     band.band_pad = 18.0f * ui_scale();
     return band;

@@ -3,7 +3,11 @@
 #include "support/scoreview_host_fixture.h"
 #include "support/temp_dir.h"
 
+#include "score_presentation.h" // fit_score_band_height
+
+#include <algorithm>
 #include <chrono>
+#include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -275,4 +279,82 @@ TEST_CASE("restart and clear-progress stay monolithic after window fallback",
         if (payload != state->payloads.front())
             CHECK(payload == kMinimalScore);
     }
+}
+
+TEST_CASE("ScoreHost flow band stays inside short and collapsed panes",
+    "[scoreview][host][layout][short-pane]")
+{
+    // Below ~107 px times the display scale the band's 96 px floor used to
+    // exceed its 90%-of-pane ceiling, handing std::clamp reversed bounds (an
+    // assertion on MSVC debug, a band taller than the pane elsewhere).
+    const std::string svg = read_verovio_svg_fixture();
+    REQUIRE_FALSE(svg.empty());
+    auto state = std::make_shared<FakeEngineState>();
+    ScoreHost host;
+    std::string error;
+    REQUIRE(ScoreHostTestAccess::prime_window(host,
+        std::make_unique<DeterministicLayoutEngine>(state, svg, false), kMinimalScore, error));
+    INFO(error);
+    REQUIRE(ScoreHostTestAccess::strip(host));
+
+    for (const float scale : { 1.0f, 2.0f, 3.0f })
+    {
+        for (const float zoom : { 0.4f, 1.0f, 4.0f })
+        {
+            for (const int height : { 0, 1, 12, 40, 100, 106, 107, 150, 213, 320, 600, 1400 })
+            {
+                CAPTURE(scale, zoom, height);
+                draxul::PluginRuntimeViewport viewport;
+                viewport.pixel_size = { 640, height };
+                viewport.pixel_scale = scale;
+                host.set_viewport(viewport);
+                ScoreHostTestAccess::set_zoom(host, zoom);
+
+                const auto band = ScoreHostTestAccess::flow_band(host);
+                const float vh = static_cast<float>(height);
+                CHECK(band.target_h >= 0.0f);
+                CHECK(band.target_h <= vh * 0.9f + 1e-3f);
+                CHECK(band.strip_y >= 0.0f);
+                CHECK(band.strip_y + band.target_h <= vh + 1e-3f);
+                // Room permitting, the floor and the zoomed share still apply.
+                const float ceiling = vh * 0.9f;
+                const float expected
+                    = std::clamp(vh * 0.35f * zoom, std::min(96.0f * scale, ceiling), ceiling);
+                CHECK(band.target_h == Catch::Approx(expected).margin(1e-3));
+
+                const auto hint = host.print_hint();
+                CHECK(hint.content_pos.y >= 0);
+                CHECK(hint.content_size.y >= 0);
+                CHECK(hint.content_pos.y + hint.content_size.y <= height);
+            }
+        }
+    }
+
+    // A normal pane keeps its familiar geometry.
+    draxul::PluginRuntimeViewport normal;
+    normal.pixel_size = { 1280, 800 };
+    normal.pixel_scale = 1.0f;
+    host.set_viewport(normal);
+    ScoreHostTestAccess::set_zoom(host, 1.0f);
+    CHECK(ScoreHostTestAccess::flow_band(host).target_h == Catch::Approx(280.0f));
+}
+
+TEST_CASE("score band fitting orders its bounds for every pane height",
+    "[scoreview][layout][short-pane]")
+{
+    using draxul::scoreview::fit_score_band_height;
+    // The Roll presentation's score region (score_height_frac 0.2..0.6 of the
+    // pane, 96 px floor) shares this fit with the flow band.
+    CHECK(fit_score_band_height(0.4f * 800.0f, 96.0f, 800.0f) == Catch::Approx(320.0f));
+    CHECK(fit_score_band_height(0.2f * 300.0f, 96.0f, 300.0f) == Catch::Approx(96.0f));
+    CHECK(fit_score_band_height(0.6f * 2000.0f, 96.0f, 2000.0f) == Catch::Approx(1200.0f));
+    // Short panes: the 90% ceiling wins over the floor.
+    CHECK(fit_score_band_height(0.4f * 100.0f, 96.0f, 100.0f) == Catch::Approx(90.0f));
+    CHECK(fit_score_band_height(0.4f * 50.0f, 192.0f, 50.0f) == Catch::Approx(45.0f));
+    // Collapsed or invalid panes produce an empty band.
+    CHECK(fit_score_band_height(0.0f, 96.0f, 0.0f) == 0.0f);
+    CHECK(fit_score_band_height(10.0f, 96.0f, -5.0f) == 0.0f);
+    CHECK(fit_score_band_height(10.0f, 96.0f, std::numeric_limits<float>::quiet_NaN()) == 0.0f);
+    CHECK(fit_score_band_height(std::numeric_limits<float>::infinity(), 96.0f, 100.0f)
+        == Catch::Approx(90.0f));
 }

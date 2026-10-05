@@ -142,6 +142,10 @@ void ScorePresentation::record_flow(
     const float vh = frame.vh;
     const bool streaming = frame.streaming;
     const FlowController& flow = *frame.flow;
+    // A collapsed pane has no band to fit the sheet into (the scale would be
+    // zero); record nothing rather than dividing by it.
+    if (!(vw > 0.0f) || !(vh > 0.0f))
+        return;
     // Layout (top to bottom): a FIXED score band (score_height_frac of the
     // pane height), then the waterfall, then the stumpy keyboard. The sheet
     // scales (locked) to fill the score band and is clipped to it, so it
@@ -149,7 +153,7 @@ void ScorePresentation::record_flow(
     const bool show_wf
         = streaming && frame.show_waterfall && !frame.waterfall_notes->empty();
     const float score_region_h
-        = std::clamp(vh * frame.score_height_frac, 96.0f * pixel_scale, vh * 0.9f);
+        = fit_score_band_height(vh * frame.score_height_frac, 96.0f * pixel_scale, vh);
     const float keyboard_h = streaming ? std::min(vw / 52.0f * 3.4f, vh * 0.16f) : 0.0f;
     const float keyboard_y = vh - keyboard_h;
     const float waterfall_h = show_wf ? std::max(0.0f, keyboard_y - score_region_h) : 0.0f;
