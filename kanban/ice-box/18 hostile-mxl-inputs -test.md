@@ -2,6 +2,8 @@
 
 **Type:** test
 
+**Priority:** P3
+
 ## Gap
 
 ScoreView covers a valid `.mxl`, generic garbage, and pure-XML rejection, but the

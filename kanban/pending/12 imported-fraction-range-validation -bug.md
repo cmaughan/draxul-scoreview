@@ -1,8 +1,7 @@
 # Preserve valid imported musical fractions
 **Summary:** Reject unrepresentable timing values so imported scores retain valid musical durations.
 
-**Priority:** 12  
-**Severity:** MEDIUM  
+**Priority:** P2  
 **Source:** `plugins/scoreview/product/draxul-notation/include/draxul/notation/score_document.h`  
 **Reported by:** Claude M16; consensus F52.
 

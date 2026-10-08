@@ -2,8 +2,7 @@
 
 **Summary:** Keep keyboard input available when a selected music device cannot open.
 
-**Priority:** 08  
-**Severity:** HIGH  
+**Priority:** P1  
 **Source:** `plugins/scoreview/product/draxul-scoreview/src/score_runtime.cpp`
 
 **Evidence and trigger:** B22; hardware selection installs fallback input, then runtime cleanup deletes that fallback when opening fails.

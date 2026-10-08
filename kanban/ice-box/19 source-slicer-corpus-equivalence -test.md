@@ -2,6 +2,8 @@
 
 **Type:** test
 
+**Priority:** P3
+
 ## Gap
 
 The Grieg regressions do not span the MusicXML state transitions a random rolling

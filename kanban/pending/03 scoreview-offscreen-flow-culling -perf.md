@@ -3,7 +3,7 @@
 **Summary:** Skip notation outside the visible area in ScoreView's Flow and Clock views so longer scores do not require drawing every note on every frame.
 
 **Source:** `plugins/scoreview/product/draxul-scoreview/src/score_render_nvg.cpp`  
-**Priority/evidence:** P2; static, high confidence. **Reported by:** Claude, Codex. `score_presentation.cpp:327–333` scissors output, but this file’s lines 157–180 and 264–269 still replay complete path and glyph outlines. Active playback uses roughly 16 ms frames. Normal windowed Roll and paged views already bound more work.
+**Priority:** P2; static, high confidence. **Reported by:** Claude, Codex. `score_presentation.cpp:327–333` scissors output, but this file’s lines 157–180 and 264–269 still replay complete path and glyph outlines. Active playback uses roughly 16 ms frames. Normal windowed Roll and paged views already bound more work.
 
 - [ ] **Baseline:** Count submitted paths/glyphs and frame p95 as monolithic score length grows with a fixed viewport.
 - [ ] **Implement:** Store conservative interpreted-object bounds and reject offscreen NanoVG submissions.

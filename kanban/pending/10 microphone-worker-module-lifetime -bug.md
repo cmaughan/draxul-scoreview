@@ -1,8 +1,7 @@
 # Keep microphone workers alive with their module
 **Summary:** Finish microphone-opening work before releasing its code so quitting during a permission prompt cannot crash.
 
-**Priority:** 10  
-**Severity:** CRITICAL  
+**Priority:** P0  
 **Source:** `plugins/scoreview/product/draxul-scoreview/src/mic_player_input.cpp`  
 **Reported by:** Claude M8; consensus F18.
 

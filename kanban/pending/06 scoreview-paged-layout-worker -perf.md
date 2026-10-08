@@ -3,7 +3,7 @@
 **Summary:** Rebuild full score pages in the background so zooming or changing views on a long piece does not monopolize the interface.
 
 **Source:** `plugins/scoreview/product/draxul-scoreview/src/score_runtime.cpp`  
-**Priority/evidence:** P2; static, medium confidence. **Reported by:** Claude. Legitimate width, zoom, and view changes still reach synchronous relayout at line 1609, render/interpret every page at 582–633, and repeat timemap-related work. Height-only invalidation should be removed first.
+**Priority:** P2; static, medium confidence. **Reported by:** Claude. Legitimate width, zoom, and view changes still reach synchronous relayout at line 1609, render/interpret every page at 582–633, and repeat timemap-related work. Height-only invalidation should be removed first.
 
 - [ ] **Baseline:** Measure pump p95, page SVG/timemap calls, and allocations for long-piece zoom/view bursts.
 - [ ] **Implement:** Use a single latest-wins owned engine worker or adapt the existing engraver; retain prior pages until a current result publishes.
