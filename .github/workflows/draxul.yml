@@ -69,8 +69,8 @@ jobs:
           -DDRAXUL_ENABLE_MEGACITY=OFF
           -DDRAXUL_ENABLE_SATVIEW=OFF
           -DDRAXUL_ENABLE_SCOREVIEW=ON
-          -DDRAXUL_ENABLE_PCBVIEW=OFF
           -DDRAXUL_ENABLE_REZONALITY=OFF
+          -DDRAXUL_ENABLE_FLASHCARDS=OFF
           -DDRAXUL_SCOREVIEW_PLUGIN_DIR="${{ github.workspace }}/product"
 
       - name: Configure macOS
@@ -83,8 +83,8 @@ jobs:
           -DDRAXUL_ENABLE_MEGACITY=OFF
           -DDRAXUL_ENABLE_SATVIEW=OFF
           -DDRAXUL_ENABLE_SCOREVIEW=ON
-          -DDRAXUL_ENABLE_PCBVIEW=OFF
           -DDRAXUL_ENABLE_REZONALITY=OFF
+          -DDRAXUL_ENABLE_FLASHCARDS=OFF
           -DDRAXUL_SCOREVIEW_PLUGIN_DIR="${{ github.workspace }}/product"
 
       - name: Build ScoreView and its focused tests
