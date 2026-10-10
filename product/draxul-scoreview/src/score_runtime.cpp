@@ -2179,7 +2179,7 @@ void ScoreRuntime::on_mouse_button(const MouseButtonEvent& event)
 {
     if (imgui_.context() == nullptr)
         return;
-    plugin_support::ImGuiInputBridge::route_mouse_button(imgui_.context(), event);
+    plugin_support::ImGuiInputBridge::route_mouse_button(imgui_, event);
     if (callbacks_ != nullptr)
         callbacks_->request_frame();
 }
@@ -2188,7 +2188,7 @@ void ScoreRuntime::on_mouse_move(const MouseMoveEvent& event)
 {
     if (imgui_.context() == nullptr)
         return;
-    plugin_support::ImGuiInputBridge::route_mouse_move(imgui_.context(), event);
+    plugin_support::ImGuiInputBridge::route_mouse_move(imgui_, event);
     if (callbacks_ != nullptr)
         callbacks_->request_frame();
 }

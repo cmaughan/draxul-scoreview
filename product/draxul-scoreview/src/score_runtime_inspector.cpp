@@ -40,10 +40,8 @@ void ScoreRuntime::render_debug_ui(float dt)
 
     if (show_debug_ui_)
     {
-        ImGui::SetNextWindowPos(
-            ImVec2(static_cast<float>(viewport_.pixel_pos.x) + 16.0f,
-                static_cast<float>(viewport_.pixel_pos.y) + 44.0f),
-            ImGuiCond_FirstUseEver);
+        // ImGui coordinates are pane-local (PluginImGuiContext::begin_frame).
+        ImGui::SetNextWindowPos(ImVec2(16.0f, 44.0f), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(ImVec2(440.0f, 620.0f), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowBgAlpha(0.92f);
         if (ImGui::Begin("ScoreView learning inspector", &show_debug_ui_))
