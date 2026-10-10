@@ -28,6 +28,8 @@ struct FakeEngineState
     std::mutex mutex;
     std::condition_variable changed;
     int load_calls = 0;
+    int options_calls = 0;
+    int svg_calls = 0;
     int permits = 0;
     int destroyed = 0;
     std::vector<std::string> payloads;
@@ -77,7 +79,11 @@ public:
         return true;
     }
 
-    void set_options(const LayoutOptions&) override {}
+    void set_options(const LayoutOptions&) override
+    {
+        std::lock_guard lock(state_->mutex);
+        ++state_->options_calls;
+    }
     bool is_loaded() const override
     {
         return loaded_;
@@ -88,6 +94,8 @@ public:
     }
     std::string render_page_svg(int page_number) override
     {
+        std::lock_guard lock(state_->mutex);
+        ++state_->svg_calls;
         return loaded_ && page_number == 1
                 && current_load_call_ != fail_interpret_on_load_call_
             ? svg_

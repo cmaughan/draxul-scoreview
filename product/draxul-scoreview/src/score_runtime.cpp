@@ -346,10 +346,20 @@ bool ScoreRuntime::is_running() const
 
 void ScoreRuntime::set_viewport(const PluginRuntimeViewport& viewport)
 {
-    const bool size_changed = viewport.pixel_size != viewport_.pixel_size || viewport.pixel_scale != viewport_.pixel_scale;
+    const bool engraving_changed = viewport.pixel_size.x != viewport_.pixel_size.x
+        || viewport.pixel_scale != viewport_.pixel_scale;
+    const bool viewport_changed = viewport.pixel_size != viewport_.pixel_size
+        || viewport.pixel_scale != viewport_.pixel_scale
+        || viewport.pixel_pos != viewport_.pixel_pos;
     viewport_ = viewport;
-    if (size_changed)
+    if (engraving_changed)
         layout_dirty_ = true;
+    if (viewport_changed)
+    {
+        scroll_y_ = std::clamp(scroll_y_, 0.0f, max_scroll());
+        if (callbacks_ != nullptr)
+            callbacks_->request_frame();
+    }
 }
 
 void ScoreRuntime::set_presentation_visible(bool visible,

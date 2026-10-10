@@ -220,6 +220,11 @@ public:
         host.set_zoom(zoom);
     }
 
+    static void set_scroll(ScoreHost& host, float y) { host.scroll_y_ = y; }
+    static float scroll(const ScoreHost& host) { return host.scroll_y_; }
+    static float max_scroll(const ScoreHost& host) { return host.max_scroll(); }
+    static auto pages(const ScoreHost& host) { return host.pages_; }
+
     static void relayout_paged(ScoreHost& host, int width = 800, int height = 600)
     {
         host.viewport_.pixel_size = { width, height };

@@ -358,3 +358,51 @@ TEST_CASE("score band fitting orders its bounds for every pane height",
     CHECK(fit_score_band_height(std::numeric_limits<float>::infinity(), 96.0f, 100.0f)
         == Catch::Approx(90.0f));
 }
+
+TEST_CASE("ScoreHost height-only viewport changes preserve paged engraving", "[scoreview][host][viewport]")
+{
+    const std::string svg = read_verovio_svg_fixture();
+    REQUIRE_FALSE(svg.empty());
+    auto state = std::make_shared<FakeEngineState>();
+    ScoreHost host;
+    std::string error;
+    REQUIRE(ScoreHostTestAccess::prime_paged(host,
+        std::make_unique<DeterministicLayoutEngine>(state, svg, false), kMinimalScore, error));
+    draxul::PluginRuntimeViewport viewport;
+    viewport.pixel_size = { 800, 300 };
+    viewport.pixel_scale = 1.0f;
+    host.set_viewport(viewport);
+    host.pump();
+    const auto pages = ScoreHostTestAccess::pages(host);
+    REQUIRE(pages);
+    const int initial_options = state->options_calls;
+    const int initial_svgs = state->svg_calls;
+    REQUIRE(initial_options == 1);
+    REQUIRE(initial_svgs == 1);
+    ScoreHostTestAccess::set_scroll(host, ScoreHostTestAccess::max_scroll(host));
+    for (int height = 310; height <= 900; height += 10)
+    {
+        viewport.pixel_size.y = height;
+        host.set_viewport(viewport);
+        host.pump();
+        CHECK(ScoreHostTestAccess::pages(host).get() == pages.get());
+        CHECK(ScoreHostTestAccess::scroll(host) <= ScoreHostTestAccess::max_scroll(host));
+    }
+    CHECK(state->options_calls == initial_options);
+    CHECK(state->svg_calls == initial_svgs);
+    ++viewport.pixel_pos.y;
+    host.set_viewport(viewport);
+    host.pump();
+    CHECK(state->options_calls == initial_options);
+    ++viewport.pixel_size.x;
+    host.set_viewport(viewport);
+    host.pump();
+    CHECK(state->options_calls == initial_options + 1);
+    viewport.pixel_scale = 2.0f;
+    host.set_viewport(viewport);
+    host.pump();
+    CHECK(state->options_calls == initial_options + 2);
+    ScoreHostTestAccess::set_zoom(host, 1.2f);
+    host.pump();
+    CHECK(state->options_calls == initial_options + 3);
+}
